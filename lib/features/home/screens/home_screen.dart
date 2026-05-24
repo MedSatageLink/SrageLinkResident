@@ -1,0 +1,161 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:gap/gap.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/theme/app_theme.dart';
+
+final myLecturesProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final uid = Supabase.instance.client.auth.currentUser!.id;
+  final res = await Supabase.instance.client
+      .from('lectures')
+      .select(
+        'id, date, time, location, max_capacity, practical_sessions(title, subjects(name))',
+      )
+      .eq('resident_id', uid)
+      .order('date', ascending: false);
+  return List<Map<String, dynamic>>.from(res as List);
+});
+
+class ResidentHomeScreen extends ConsumerWidget {
+  const ResidentHomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lecturesAsync = ref.watch(myLecturesProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('محاضراتي'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline_rounded),
+            onPressed: () => context.go('/profile'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            onPressed: () async =>
+                await Supabase.instance.client.auth.signOut(),
+          ),
+        ],
+      ),
+      body: lecturesAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text(e.toString())),
+        data: (lectures) {
+          if (lectures.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.event_note_rounded,
+                    size: 72,
+                    color: AppColors.textSecondary.withValues(alpha: 0.4),
+                  ),
+                  const Gap(16),
+                  const Text('لا توجد محاضرات مسندة إليك'),
+                ],
+              ),
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: lectures.length,
+            itemBuilder: (context, i) {
+              final l = lectures[i];
+              final session = l['practical_sessions'] as Map<String, dynamic>?;
+              final subject =
+                  (session?['subjects'] as Map<String, dynamic>?)?['name'] ??
+                  '—';
+              return Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => context.go('/scan/${l['id']}'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryContainer,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            Icons.qr_code_scanner_rounded,
+                            color: AppColors.primary,
+                            size: 28,
+                          ),
+                        ),
+                        const Gap(14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                session?['title'] as String? ?? '—',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                              Text(
+                                subject,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                              const Gap(4),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.event_outlined,
+                                    size: 13,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  const Gap(4),
+                                  Text(
+                                    '${l['date']} · ${l['time']}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(fontSize: 12),
+                                  ),
+                                  const Gap(8),
+                                  const Icon(
+                                    Icons.location_on_outlined,
+                                    size: 13,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  const Gap(4),
+                                  Expanded(
+                                    child: Text(
+                                      l['location'] as String? ?? '',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(fontSize: 12),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          Icons.qr_code_scanner_rounded,
+                          color: AppColors.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ).animate(delay: (40 * i).ms).fadeIn();
+            },
+          );
+        },
+      ),
+    );
+  }
+}

@@ -1,0 +1,180 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:gap/gap.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/theme/app_theme.dart';
+
+final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final uid = Supabase.instance.client.auth.currentUser!.id;
+  final lectures = await Supabase.instance.client
+      .from('lectures')
+      .select(
+        'id, date, time, location, max_capacity, attendance_window_start, attendance_window_end, practical_sessions(title)',
+      )
+      .eq('resident_id', uid)
+      .order('date', ascending: false);
+
+  final lectureIds = (lectures as List).map((l) => l['id'] as String).toList();
+  final attendanceCounts = lectureIds.isEmpty
+      ? <dynamic>[]
+      : await Supabase.instance.client
+            .from('practical_attendance')
+            .select('lecture_id')
+            .inFilter('lecture_id', lectureIds);
+
+  final countMap = <String, int>{};
+  for (final a in attendanceCounts) {
+    final id = a['lecture_id'] as String;
+    countMap[id] = (countMap[id] ?? 0) + 1;
+  }
+
+  return lectures.map<Map<String, dynamic>>((l) {
+    return {...l, 'attendance_count': countMap[l['id'] as String] ?? 0};
+  }).toList();
+});
+
+class MyLecturesScreen extends ConsumerWidget {
+  const MyLecturesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lecturesAsync = ref.watch(myLecturesDetailProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('محاضراتي')),
+      body: lecturesAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text(e.toString())),
+        data: (lectures) => lectures.isEmpty
+            ? const Center(child: Text('لا توجد محاضرات'))
+            : ListView.builder(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                itemCount: lectures.length,
+                itemBuilder: (context, i) {
+                  final l = lectures[i];
+                  final session =
+                      l['practical_sessions'] as Map<String, dynamic>?;
+                  final count = l['attendance_count'] as int;
+                  final cap = l['max_capacity'] as int;
+                  final pct = cap > 0 ? count / cap : 0.0;
+
+                  final now = DateTime.now();
+                  final windowStart = DateTime.tryParse(
+                    l['attendance_window_start'] as String? ?? '',
+                  );
+                  final windowEnd = DateTime.tryParse(
+                    l['attendance_window_end'] as String? ?? '',
+                  );
+                  final isOpen =
+                      windowStart != null &&
+                      windowEnd != null &&
+                      now.isAfter(windowStart) &&
+                      now.isBefore(windowEnd);
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => context.go('/scan/${l['id']}'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    session?['title'] as String? ?? '—',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                ),
+                                if (isOpen)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.success.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      'مفتوح',
+                                      style: TextStyle(
+                                        color: AppColors.success,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const Gap(6),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.event_outlined,
+                                  size: 14,
+                                  color: AppColors.textSecondary,
+                                ),
+                                const Gap(4),
+                                Text(
+                                  '${l['date']} · ${l['time']}',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                                const Gap(12),
+                                const Icon(
+                                  Icons.location_on_outlined,
+                                  size: 14,
+                                  color: AppColors.textSecondary,
+                                ),
+                                const Gap(4),
+                                Text(
+                                  l['location'] as String? ?? '',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
+                            const Gap(10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: LinearProgressIndicator(
+                                    value: pct.clamp(0.0, 1.0),
+                                    backgroundColor: AppColors.divider,
+                                    valueColor: AlwaysStoppedAnimation(
+                                      AppColors.primary,
+                                    ),
+                                    minHeight: 6,
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                ),
+                                const Gap(8),
+                                Text(
+                                  '$count/$cap',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ).animate(delay: (40 * i).ms).fadeIn();
+                },
+              ),
+      ),
+    );
+  }
+}
