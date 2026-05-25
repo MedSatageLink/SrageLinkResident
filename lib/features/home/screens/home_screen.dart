@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 
 final myLecturesProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -13,15 +14,26 @@ final myLecturesProvider = FutureProvider<List<Map<String, dynamic>>>((
   final res = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, date, time, location, max_capacity, practical_sessions(title, subjects(name))',
+        'id, start_at, end_at, location, practical_sessions(title, subjects(name))',
       )
       .eq('resident_id', uid)
-      .order('date', ascending: false);
+      .order('start_at', ascending: false);
   return List<Map<String, dynamic>>.from(res as List);
 });
 
 class ResidentHomeScreen extends ConsumerWidget {
   const ResidentHomeScreen({super.key});
+
+  String _formatLectureLine(Map<String, dynamic> lecture) {
+    final start = DateTime.tryParse(lecture['start_at'] as String? ?? '');
+    final end = DateTime.tryParse(lecture['end_at'] as String? ?? '');
+    if (start == null) return '—';
+    final dateStr = DateFormat('yyyy-MM-dd').format(start);
+    final timeStr = DateFormat('HH:mm').format(start);
+    final dur = end == null ? '' : '${end.difference(start).inMinutes} د';
+    final durStr = dur.isEmpty ? '' : ' · $dur';
+    return '$dateStr · $timeStr$durStr';
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -115,7 +127,7 @@ class ResidentHomeScreen extends ConsumerWidget {
                                   ),
                                   const Gap(4),
                                   Text(
-                                    '${l['date']} · ${l['time']}',
+                                    _formatLectureLine(l),
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium

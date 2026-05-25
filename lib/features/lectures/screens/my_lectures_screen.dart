@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 
 final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -13,10 +14,10 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   final lectures = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, date, time, location, max_capacity, attendance_window_start, attendance_window_end, practical_sessions(title)',
+        'id, start_at, end_at, location, attendance_window_start, attendance_window_end, practical_sessions(title)',
       )
       .eq('resident_id', uid)
-      .order('date', ascending: false);
+      .order('start_at', ascending: false);
 
   final lectureIds = (lectures as List).map((l) => l['id'] as String).toList();
   final attendanceCounts = lectureIds.isEmpty
@@ -40,6 +41,17 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
 class MyLecturesScreen extends ConsumerWidget {
   const MyLecturesScreen({super.key});
 
+  String _formatLectureLine(Map<String, dynamic> lecture) {
+    final start = DateTime.tryParse(lecture['start_at'] as String? ?? '');
+    final end = DateTime.tryParse(lecture['end_at'] as String? ?? '');
+    if (start == null) return '—';
+    final dateStr = DateFormat('yyyy-MM-dd').format(start);
+    final timeStr = DateFormat('HH:mm').format(start);
+    final dur = end == null ? '' : '${end.difference(start).inMinutes} د';
+    final durStr = dur.isEmpty ? '' : ' · $dur';
+    return '$dateStr · $timeStr$durStr';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lecturesAsync = ref.watch(myLecturesDetailProvider);
@@ -61,8 +73,6 @@ class MyLecturesScreen extends ConsumerWidget {
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
                   final count = l['attendance_count'] as int;
-                  final cap = l['max_capacity'] as int;
-                  final pct = cap > 0 ? count / cap : 0.0;
 
                   final now = DateTime.now();
                   final windowStart = DateTime.tryParse(
@@ -130,7 +140,7 @@ class MyLecturesScreen extends ConsumerWidget {
                                 ),
                                 const Gap(4),
                                 Text(
-                                  '${l['date']} · ${l['time']}',
+                                  _formatLectureLine(l),
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                                 const Gap(12),
@@ -147,25 +157,9 @@ class MyLecturesScreen extends ConsumerWidget {
                               ],
                             ),
                             const Gap(10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: LinearProgressIndicator(
-                                    value: pct.clamp(0.0, 1.0),
-                                    backgroundColor: AppColors.divider,
-                                    valueColor: AlwaysStoppedAnimation(
-                                      AppColors.primary,
-                                    ),
-                                    minHeight: 6,
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                ),
-                                const Gap(8),
-                                Text(
-                                  '$count/$cap',
-                                  style: Theme.of(context).textTheme.bodyMedium,
-                                ),
-                              ],
+                            Text(
+                              'عدد الحضور: $count',
+                              style: Theme.of(context).textTheme.bodyMedium,
                             ),
                           ],
                         ),
