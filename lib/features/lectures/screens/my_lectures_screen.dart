@@ -70,6 +70,9 @@ class MyLecturesScreen extends ConsumerWidget {
                 itemCount: lectures.length,
                 itemBuilder: (context, i) {
                   final l = lectures[i];
+                  final muted = Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6);
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
                   final count = l['attendance_count'] as int;
@@ -133,10 +136,10 @@ class MyLecturesScreen extends ConsumerWidget {
                             const Gap(6),
                             Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.event_outlined,
                                   size: 14,
-                                  color: AppColors.textSecondary,
+                                  color: muted,
                                 ),
                                 const Gap(4),
                                 Text(
@@ -144,10 +147,10 @@ class MyLecturesScreen extends ConsumerWidget {
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                                 const Gap(12),
-                                const Icon(
+                                Icon(
                                   Icons.location_on_outlined,
                                   size: 14,
-                                  color: AppColors.textSecondary,
+                                  color: muted,
                                 ),
                                 const Gap(4),
                                 Text(

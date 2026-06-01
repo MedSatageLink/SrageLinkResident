@@ -57,6 +57,9 @@ class ResidentHomeScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text(e.toString())),
         data: (lectures) {
+          final muted = Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.6);
           if (lectures.isEmpty) {
             return Center(
               child: Column(
@@ -65,7 +68,7 @@ class ResidentHomeScreen extends ConsumerWidget {
                   Icon(
                     Icons.event_note_rounded,
                     size: 72,
-                    color: AppColors.textSecondary.withValues(alpha: 0.4),
+                    color: muted.withValues(alpha: 0.4),
                   ),
                   const Gap(16),
                   const Text('لا توجد محاضرات مسندة إليك'),
@@ -120,10 +123,10 @@ class ResidentHomeScreen extends ConsumerWidget {
                               const Gap(4),
                               Row(
                                 children: [
-                                  const Icon(
+                                  Icon(
                                     Icons.event_outlined,
                                     size: 13,
-                                    color: AppColors.textSecondary,
+                                    color: muted,
                                   ),
                                   const Gap(4),
                                   Text(
@@ -134,10 +137,10 @@ class ResidentHomeScreen extends ConsumerWidget {
                                         ?.copyWith(fontSize: 12),
                                   ),
                                   const Gap(8),
-                                  const Icon(
+                                  Icon(
                                     Icons.location_on_outlined,
                                     size: 13,
-                                    color: AppColors.textSecondary,
+                                    color: muted,
                                   ),
                                   const Gap(4),
                                   Expanded(
