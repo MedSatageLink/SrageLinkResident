@@ -47,7 +47,7 @@ class _State extends ConsumerState<ScannerScreen> {
       await Supabase.instance.client.from('practical_attendance').insert({
         'lecture_id': lectureId,
         'student_id': studentId,
-        'resident_id': Supabase.instance.client.auth.currentUser!.id,
+        'scanned_by': Supabase.instance.client.auth.currentUser!.id,
       });
 
       // Get student name

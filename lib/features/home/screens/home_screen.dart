@@ -43,6 +43,10 @@ class ResidentHomeScreen extends ConsumerWidget {
         title: const Text('محاضراتي'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.video_call_rounded),
+            onPressed: () => context.go('/practical-videos/create'),
+          ),
+          IconButton(
             icon: const Icon(Icons.person_outline_rounded),
             onPressed: () => context.go('/profile'),
           ),
