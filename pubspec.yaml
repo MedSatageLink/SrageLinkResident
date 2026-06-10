@@ -55,6 +55,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
   build_runner: ^2.4.14
   riverpod_generator: ^2.6.4
   custom_lint: ^0.7.5
@@ -101,3 +102,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assest/icon/resident.png"
+  remove_alpha_ios: true
+  adaptive_icon_background: "#1B5E20"
+  adaptive_icon_foreground: "assest/icon/resident.png"
