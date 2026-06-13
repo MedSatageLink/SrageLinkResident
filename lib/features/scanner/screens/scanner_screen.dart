@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:gap/gap.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/services/attendance_sync_service.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
   final String lectureId;
@@ -18,6 +19,12 @@ class _State extends ConsumerState<ScannerScreen> {
   bool _processing = false;
   String? _lastResult;
   bool _lastSuccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AttendanceSyncService.instance.syncPendingQueue();
+  }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_processing) return;
@@ -43,30 +50,18 @@ class _State extends ConsumerState<ScannerScreen> {
         return;
       }
 
-      // Insert attendance (trigger will validate window & prerequisite)
-      await Supabase.instance.client.from('practical_attendance').insert({
-        'lecture_id': lectureId,
-        'student_id': studentId,
-        'scanned_by': Supabase.instance.client.auth.currentUser!.id,
-      });
-
-      // Get student name
-      final profile = await Supabase.instance.client
-          .from('profiles')
-          .select('full_name')
-          .eq('id', studentId)
-          .single();
-      final name = profile['full_name'] as String? ?? 'الطالب';
+      final result = await AttendanceSyncService.instance.processScan(
+        lectureId: lectureId,
+        studentId: studentId,
+      );
 
       setState(() {
-        _lastResult = 'تم تسجيل حضور $name ✓';
-        _lastSuccess = true;
+        _lastResult = result.message;
+        _lastSuccess = result.success;
       });
     } on PostgrestException catch (e) {
       String msg = 'فشل التسجيل';
-      if (e.message.contains('window')) {
-        msg = 'خارج نافذة الحضور';
-      } else if (e.message.contains('prerequisite')) {
+      if (e.message.contains('prerequisite')) {
         msg = 'لم يُشاهد الفيديو الإلزامي';
       } else if (e.message.contains('duplicate') ||
           e.message.contains('unique')) {

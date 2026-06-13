@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -5,20 +8,46 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 
 final myLecturesProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
   final uid = Supabase.instance.client.auth.currentUser!.id;
-  final res = await Supabase.instance.client
-      .from('lectures')
-      .select(
-        'id, start_at, end_at, location, practical_sessions(title, subjects(name))',
-      )
-      .eq('resident_id', uid)
-      .order('start_at', ascending: false);
-  return List<Map<String, dynamic>>.from(res as List);
+  Future<List<Map<String, dynamic>>> fetchRemote() async {
+    final res = await Supabase.instance.client
+        .from('lectures')
+        .select(
+          'id, start_at, end_at, location, practical_sessions(title, subjects(name))',
+        )
+        .eq('resident_id', uid)
+        .order('start_at', ascending: false);
+    return List<Map<String, dynamic>>.from(res as List);
+  }
+
+  final prefs = await SharedPreferences.getInstance();
+  final cacheKey = 'resident_lectures_$uid';
+  final cachedRaw = prefs.getString(cacheKey);
+  if (cachedRaw != null) {
+    final cached = List<Map<String, dynamic>>.from(
+      (jsonDecode(cachedRaw) as List).cast<Map<String, dynamic>>(),
+    );
+
+    unawaited(
+      fetchRemote()
+          .then((fresh) async {
+            await prefs.setString(cacheKey, jsonEncode(fresh));
+          })
+          .catchError((_) {}),
+    );
+
+    return cached;
+  }
+
+  final fresh = await fetchRemote();
+  await prefs.setString(cacheKey, jsonEncode(fresh));
+  return fresh;
 });
 
 class ResidentHomeScreen extends ConsumerWidget {

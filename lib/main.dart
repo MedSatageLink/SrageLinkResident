@@ -6,6 +6,7 @@ import 'supabase_config.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_mode_provider.dart';
 import 'core/router/app_router.dart';
+import 'core/services/attendance_sync_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,6 +14,10 @@ Future<void> main() async {
     url: SupabaseConfig.supabaseUrl,
     anonKey: SupabaseConfig.supabaseAnonKey,
   );
+
+  await AttendanceSyncService.instance.initializeBackgroundSync();
+  await AttendanceSyncService.instance.syncPendingQueue();
+
   runApp(const ProviderScope(child: MyApp()));
 }
 
