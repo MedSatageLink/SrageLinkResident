@@ -6,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:gap/gap.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/attendance_sync_service.dart';
+import 'package:stagelink_resident/core/utils/app_error_message.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
   final String lectureId;
@@ -60,20 +61,14 @@ class _State extends ConsumerState<ScannerScreen> {
         _lastSuccess = result.success;
       });
     } on PostgrestException catch (e) {
-      String msg = 'فشل التسجيل';
-      if (e.message.contains('prerequisite')) {
-        msg = 'لم يُشاهد الفيديو الإلزامي';
-      } else if (e.message.contains('duplicate') ||
-          e.message.contains('unique')) {
-        msg = 'تم تسجيل هذا الطالب مسبقاً';
-      }
+      final msg = AppErrorMessage.from(e);
       setState(() {
         _lastResult = msg;
         _lastSuccess = false;
       });
     } catch (e) {
       setState(() {
-        _lastResult = 'خطأ: $e';
+        _lastResult = AppErrorMessage.from(e);
         _lastSuccess = false;
       });
     } finally {

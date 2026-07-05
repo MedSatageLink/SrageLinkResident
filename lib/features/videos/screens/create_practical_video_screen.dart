@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:gap/gap.dart';
+import 'package:stagelink_resident/core/utils/app_error_message.dart';
 
 import '../../../core/theme/app_theme.dart';
 
@@ -121,7 +122,10 @@ class _State extends ConsumerState<CreatePracticalVideoScreen> {
     } on PostgrestException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+        SnackBar(
+          content: Text(AppErrorMessage.from(e)),
+          backgroundColor: AppColors.error,
+        ),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -261,7 +265,7 @@ class _State extends ConsumerState<CreatePracticalVideoScreen> {
       appBar: AppBar(title: const Text('إنشاء فيديو عملي')),
       body: subjectAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(e.toString())),
+        error: (e, _) => Center(child: Text(AppErrorMessage.from(e))),
         data: (profile) {
           final subjectId = profile['subject_id'] as String?;
 
@@ -353,7 +357,7 @@ class _State extends ConsumerState<CreatePracticalVideoScreen> {
                 ),
                 error: (e, _) => Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text(e.toString()),
+                  child: Text(AppErrorMessage.from(e)),
                 ),
                 data: (videos) {
                   if (videos.isEmpty) {

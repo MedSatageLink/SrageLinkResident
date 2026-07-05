@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
+import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
 
@@ -21,6 +22,46 @@ class _State extends ConsumerState<ResidentLoginScreen> {
   bool _obscure = true;
   String? _error;
 
+  static const _cardBg = Color(0xFFF8FAFC);
+  static const _fieldBg = Color(0xFFF1F5F9);
+  static const _fieldBorder = Color(0xFFCBD5E1);
+  static const _fieldText = Color(0xFF0F172A);
+  static const _fieldHint = Color(0xFF64748B);
+  static const _buttonBg = Color(0xFF059669);
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    required IconData icon,
+    Widget? suffix,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: _fieldHint),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: _fieldBg,
+      labelStyle: const TextStyle(color: _fieldHint),
+      hintStyle: const TextStyle(color: _fieldHint),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _fieldBorder),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _buttonBg, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: AppColors.error),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: AppColors.error, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
@@ -34,7 +75,7 @@ class _State extends ConsumerState<ResidentLoginScreen> {
       );
       ref.invalidate(routerProvider);
     } catch (e) {
-      setState(() => _error = 'البريد أو كلمة المرور غير صحيحة');
+      setState(() => _error = AppErrorMessage.from(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -95,8 +136,18 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                     Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: _cardBg,
                         borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.65),
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x22000000),
+                            blurRadius: 20,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
                       ),
                       child: Column(
                         children: [
@@ -104,9 +155,10 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textDirection: TextDirection.ltr,
-                            decoration: const InputDecoration(
-                              labelText: 'البريد الإلكتروني',
-                              prefixIcon: Icon(Icons.email_outlined),
+                            style: const TextStyle(color: _fieldText),
+                            decoration: _fieldDecoration(
+                              label: 'البريد الإلكتروني',
+                              icon: Icons.email_outlined,
                             ),
                             validator: (v) =>
                                 v!.isEmpty ? 'أدخل البريد الإلكتروني' : null,
@@ -116,16 +168,16 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                             controller: _passCtrl,
                             obscureText: _obscure,
                             textDirection: TextDirection.ltr,
-                            decoration: InputDecoration(
-                              labelText: 'كلمة المرور',
-                              prefixIcon: const Icon(
-                                Icons.lock_outline_rounded,
-                              ),
-                              suffixIcon: IconButton(
+                            style: const TextStyle(color: _fieldText),
+                            decoration: _fieldDecoration(
+                              label: 'كلمة المرور',
+                              icon: Icons.lock_outline_rounded,
+                              suffix: IconButton(
                                 icon: Icon(
                                   _obscure
                                       ? Icons.visibility_off_outlined
                                       : Icons.visibility_outlined,
+                                  color: _fieldHint,
                                 ),
                                 onPressed: () =>
                                     setState(() => _obscure = !_obscure),
@@ -150,7 +202,7 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 14,
                                 ),
-                                backgroundColor: const Color(0xFF059669),
+                                backgroundColor: _buttonBg,
                                 foregroundColor: Colors.white,
                               ),
                               child: _loading

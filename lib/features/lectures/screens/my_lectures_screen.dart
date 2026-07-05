@@ -5,6 +5,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 
 final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -59,7 +60,7 @@ class MyLecturesScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('محاضراتي')),
       body: lecturesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(e.toString())),
+        error: (e, _) => Center(child: Text(AppErrorMessage.from(e))),
         data: (lectures) => lectures.isEmpty
             ? const Center(child: Text('لا توجد محاضرات'))
             : ListView.builder(
@@ -94,7 +95,7 @@ class MyLecturesScreen extends ConsumerWidget {
                     margin: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => context.go('/scan/${l['id']}'),
+                      onTap: () => context.push('/scan/${l['id']}'),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(

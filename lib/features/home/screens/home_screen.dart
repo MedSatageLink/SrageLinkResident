@@ -9,6 +9,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 
 final myLecturesProvider = FutureProvider<List<Map<String, dynamic>>>((
@@ -73,11 +74,11 @@ class ResidentHomeScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.video_call_rounded),
-            onPressed: () => context.go('/practical-videos/create'),
+            onPressed: () => context.push('/practical-videos/create'),
           ),
           IconButton(
             icon: const Icon(Icons.person_outline_rounded),
-            onPressed: () => context.go('/profile'),
+            onPressed: () => context.push('/profile'),
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
@@ -88,7 +89,7 @@ class ResidentHomeScreen extends ConsumerWidget {
       ),
       body: lecturesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text(e.toString())),
+        error: (e, _) => Center(child: Text(AppErrorMessage.from(e))),
         data: (lectures) {
           final muted = Theme.of(
             context,
@@ -122,7 +123,7 @@ class ResidentHomeScreen extends ConsumerWidget {
                 margin: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => context.go('/scan/${l['id']}'),
+                  onTap: () => context.push('/scan/${l['id']}'),
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Row(
