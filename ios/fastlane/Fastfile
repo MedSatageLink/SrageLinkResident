@@ -9,8 +9,6 @@ platform :ios do
       APP_STORE_CONNECT_API_KEY_BASE64
       APPLE_TEAM_ID
       IOS_BUNDLE_ID
-      MATCH_GIT_URL
-      MATCH_PASSWORD
     ]
 
     missing = required.select { |k| ENV[k].to_s.strip.empty? }
@@ -42,16 +40,6 @@ platform :ios do
       xcodeproj: "Runner.xcodeproj",
       plist_path: "Runner/Info.plist",
       app_identifier: ENV["IOS_BUNDLE_ID"],
-    )
-
-    match(
-      type: "appstore",
-      app_identifier: [ENV["IOS_BUNDLE_ID"]],
-      api_key: api_key,
-      readonly: false,
-      git_url: ENV["MATCH_GIT_URL"],
-      git_branch: ENV.fetch("MATCH_GIT_BRANCH", "main"),
-      git_basic_authorization: ENV["MATCH_GIT_BASIC_AUTHORIZATION"],
     )
 
     increment_build_number(
