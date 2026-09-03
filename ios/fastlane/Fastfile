@@ -71,6 +71,12 @@ platform :ios do
       targets: ["Runner"],
     )
 
+    update_app_identifier(
+      xcodeproj: "Runner.xcodeproj",
+      plist_path: "Runner/Info.plist",
+      app_identifier: bundle_id,
+    )
+
     begin
       build_ios_app(
         workspace: "Runner.xcworkspace",
@@ -78,6 +84,7 @@ platform :ios do
         configuration: "Release",
         clean: true,
         export_method: "app-store",
+        skip_profile_detection: true,
         output_directory: "../build/ios",
         output_name: "stagelink_resident.ipa",
         export_options: {
