@@ -45,6 +45,8 @@ jobs:
         env:
           IOS_DISTRIBUTION_CER_BASE64: ${{ secrets.IOS_DISTRIBUTION_CER_BASE64 }}
           IOS_DISTRIBUTION_KEY_BASE64: ${{ secrets.IOS_DISTRIBUTION_KEY_BASE64 }}
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: |
           CERT_PATH=$RUNNER_TEMP/dist.cer
           KEY_PATH=$RUNNER_TEMP/dist.key
@@ -54,11 +56,18 @@ jobs:
           KEYCHAIN_PASSWORD=temp_signing_keychain
           P12_PASSWORD=temp_p12_password
 
-          echo "$IOS_DISTRIBUTION_CER_BASE64" | base64 --decode > "$CERT_PATH"
-          echo "$IOS_DISTRIBUTION_KEY_BASE64" | base64 --decode > "$KEY_PATH"
-
-          openssl x509 -inform DER -in "$CERT_PATH" -out "$PEM_PATH"
-          openssl pkcs12 -export -inkey "$KEY_PATH" -in "$PEM_PATH" -out "$P12_PATH" -password pass:"$P12_PASSWORD"
+          if [[ -n "$IOS_DISTRIBUTION_CER_BASE64" && -n "$IOS_DISTRIBUTION_KEY_BASE64" ]]; then
+            echo "$IOS_DISTRIBUTION_CER_BASE64" | base64 --decode > "$CERT_PATH"
+            echo "$IOS_DISTRIBUTION_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+            openssl x509 -inform DER -in "$CERT_PATH" -out "$PEM_PATH"
+            openssl pkcs12 -export -inkey "$KEY_PATH" -in "$PEM_PATH" -out "$P12_PATH" -password pass:"$P12_PASSWORD"
+          elif [[ -n "$IOS_CERTIFICATE_P12_BASE64" && -n "$IOS_CERTIFICATE_PASSWORD" ]]; then
+            P12_PASSWORD="$IOS_CERTIFICATE_PASSWORD"
+            echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$P12_PATH"
+          else
+            echo "Missing signing secrets. Provide either IOS_DISTRIBUTION_CER_BASE64 + IOS_DISTRIBUTION_KEY_BASE64 OR IOS_CERTIFICATE_P12_BASE64 + IOS_CERTIFICATE_PASSWORD"
+            exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
