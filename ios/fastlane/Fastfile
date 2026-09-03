@@ -9,6 +9,7 @@ platform :ios do
       APP_STORE_CONNECT_API_KEY_BASE64
       APPLE_TEAM_ID
       IOS_BUNDLE_ID
+      IOS_PROFILE_NAME
     ]
 
     missing = required.select { |k| ENV[k].to_s.strip.empty? }
@@ -26,14 +27,11 @@ platform :ios do
     setup_ci if ENV["CI"]
 
     update_code_signing_settings(
-      use_automatic_signing: true,
+      use_automatic_signing: false,
       path: "Runner.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
-    )
-
-    update_project_team(
-      path: "Runner.xcodeproj",
-      teamid: ENV["APPLE_TEAM_ID"],
+      code_sign_identity: "Apple Distribution",
+      profile_name: ENV["IOS_PROFILE_NAME"],
     )
 
     update_app_identifier(
@@ -52,6 +50,15 @@ platform :ios do
       scheme: "Runner",
       clean: true,
       export_method: "app-store",
+      skip_profile_detection: true,
+      export_options: {
+        signingStyle: "manual",
+        method: "app-store",
+        teamID: ENV["APPLE_TEAM_ID"],
+        provisioningProfiles: {
+          ENV["IOS_BUNDLE_ID"] => ENV["IOS_PROFILE_NAME"],
+        },
+      },
       output_directory: "../build/ios",
       output_name: "stagelink_resident.ipa",
       include_symbols: true,

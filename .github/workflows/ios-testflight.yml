@@ -81,8 +81,22 @@ jobs:
         env:
           IOS_MOBILEPROVISION_BASE64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
         run: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$IOS_MOBILEPROVISION_BASE64" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/stagelink.mobileprovision
+          PP_DIR=~/Library/MobileDevice/Provisioning\ Profiles
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          PROFILE_PLIST=$RUNNER_TEMP/profile.plist
+
+          mkdir -p "$PP_DIR"
+          echo "$IOS_MOBILEPROVISION_BASE64" | base64 --decode > "$PROFILE_PATH"
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$PROFILE_PLIST")
+
+          cp "$PROFILE_PATH" "$PP_DIR/$PROFILE_UUID.mobileprovision"
+
+          echo "IOS_PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+          echo "IOS_PROFILE_NAME=$PROFILE_NAME" >> $GITHUB_ENV
+          echo "Installed provisioning profile: $PROFILE_NAME ($PROFILE_UUID)"
 
       - name: Build and Upload TestFlight
         working-directory: ios
