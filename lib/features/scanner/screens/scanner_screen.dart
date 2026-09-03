@@ -39,6 +39,23 @@ class _State extends ConsumerState<ScannerScreen> {
   Future<void> _startScanning() async {
     if (_isScanning) return;
     try {
+      if (!await FlutterBluePlus.isSupported) {
+        if (!mounted) return;
+        setState(() {
+          _lastResult = 'هذا الجهاز لا يدعم BLE';
+          _lastSuccess = false;
+          _isScanning = false;
+        });
+        return;
+      }
+
+      final adapterState = await FlutterBluePlus.adapterState.first;
+      if (adapterState != BluetoothAdapterState.on) {
+        try {
+          await FlutterBluePlus.turnOn();
+        } catch (_) {}
+      }
+
       await FlutterBluePlus.stopScan();
       _scanSub?.cancel();
       _scanSub = FlutterBluePlus.onScanResults.listen(
@@ -47,14 +64,21 @@ class _State extends ConsumerState<ScannerScreen> {
       );
       await FlutterBluePlus.startScan(
         timeout: const Duration(days: 1),
-        androidUsesFineLocation: true,
+        androidUsesFineLocation: false,
       );
       if (!mounted) return;
       setState(() => _isScanning = true);
-    } catch (_) {
+    } catch (e) {
+      final text = e.toString();
+      var msg = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
+      if (text.contains('permission') || text.contains('Permission')) {
+        msg = 'لا توجد صلاحية كافية للبلوتوث. فعّل Nearby devices/Location ثم أعد المحاولة';
+      } else if (text.contains('off') || text.contains('Off')) {
+        msg = 'البلوتوث غير مفعل، يرجى تفعيله أولاً';
+      }
       if (!mounted) return;
       setState(() {
-        _lastResult = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
+        _lastResult = '$msg\n($text)';
         _lastSuccess = false;
         _isScanning = false;
       });
