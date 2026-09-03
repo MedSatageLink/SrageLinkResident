@@ -1,6 +1,9 @@
 require "base64"
 require "fileutils"
 require "tmpdir"
+require "shellwords"
+require "digest"
+require "openssl"
 
 default_platform(:ios)
 
@@ -49,12 +52,31 @@ platform :ios do
       keychain_path = "#{keychain_path}-db"
     end
 
-    File.binwrite(p12_path, Base64.decode64(ENV["IOS_DISTRIBUTION_P12_BASE64"]))
+    p12_base64 = ENV["IOS_DISTRIBUTION_P12_BASE64"].to_s.gsub(/\s+/, "")
+    p12_password = ENV["IOS_DISTRIBUTION_P12_PASSWORD"].to_s
+    p12_password_stripped = p12_password.strip
+    UI.important("IOS_DISTRIBUTION_P12_PASSWORD contains leading/trailing whitespace; it will be trimmed") if p12_password != p12_password_stripped
+
+    begin
+      p12_binary = Base64.strict_decode64(p12_base64)
+    rescue ArgumentError => e
+      UI.user_error!("Invalid IOS_DISTRIBUTION_P12_BASE64 value: #{e.message}")
+    end
+
+    File.binwrite(p12_path, p12_binary)
     File.binwrite(profile_path, Base64.decode64(ENV["IOS_APPSTORE_PROFILE_BASE64"]))
 
-    sh("security import '#{p12_path}' -k '#{keychain_path}' -P '#{ENV['IOS_DISTRIBUTION_P12_PASSWORD']}' -A -T /usr/bin/codesign -T /usr/bin/security")
-    sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '#{keychain_password}' '#{keychain_path}'")
-    sh("security find-identity -v -p codesigning '#{keychain_path}'")
+    UI.message("Signing debug: p12_bytes=#{File.size(p12_path)}, p12_sha256=#{Digest::SHA256.file(p12_path).hexdigest[0,16]}, pass_len=#{p12_password_stripped.length}")
+
+    begin
+      OpenSSL::PKCS12.new(File.binread(p12_path), p12_password_stripped)
+    rescue OpenSSL::PKCS12::PKCS12Error => e
+      UI.user_error!("P12 validation failed before keychain import. IOS_DISTRIBUTION_P12_BASE64 and IOS_DISTRIBUTION_P12_PASSWORD do not match. Details: #{e.message}")
+    end
+
+    sh("security import #{Shellwords.escape(p12_path)} -k #{Shellwords.escape(keychain_path)} -P #{Shellwords.escape(p12_password_stripped)} -A -T /usr/bin/codesign -T /usr/bin/security")
+    sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k #{Shellwords.escape(keychain_password)} #{Shellwords.escape(keychain_path)}")
+    sh("security find-identity -v -p codesigning #{Shellwords.escape(keychain_path)}")
 
     sh("security cms -D -i '#{profile_path}' > '#{profile_plist}'")
 
