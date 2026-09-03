@@ -16,6 +16,15 @@ jobs:
   build-and-upload:
     runs-on: macos-14
     timeout-minutes: 60
+    env:
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+      IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+      IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+      IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
 
     steps:
       - name: Checkout
@@ -35,22 +44,55 @@ jobs:
         with:
           ruby-version: "3.3"
           bundler-cache: true
-          working-directory: ios
 
       - name: Install CocoaPods
-        working-directory: ios
-        run: bundle exec pod install
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Validate required secrets
+        run: |
+          test -n "$APP_STORE_CONNECT_ISSUER_ID" || (echo "Missing APP_STORE_CONNECT_ISSUER_ID" && exit 1)
+          test -n "$APP_STORE_CONNECT_KEY_ID" || (echo "Missing APP_STORE_CONNECT_KEY_ID" && exit 1)
+          test -n "$APP_STORE_CONNECT_API_KEY" || (echo "Missing APP_STORE_CONNECT_API_KEY" && exit 1)
+          test -n "$APPLE_TEAM_ID" || (echo "Missing APPLE_TEAM_ID" && exit 1)
+          test -n "$IOS_BUNDLE_ID" || (echo "Missing IOS_BUNDLE_ID" && exit 1)
+          test -n "$IOS_DISTRIBUTION_P12_BASE64" || (echo "Missing IOS_DISTRIBUTION_P12_BASE64" && exit 1)
+          test -n "$IOS_DISTRIBUTION_P12_PASSWORD" || (echo "Missing IOS_DISTRIBUTION_P12_PASSWORD" && exit 1)
+          test -n "$IOS_APPSTORE_PROFILE_BASE64" || (echo "Missing IOS_APPSTORE_PROFILE_BASE64" && exit 1)
+
+      - name: Prepare signing files
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          printf '%s' "$IOS_DISTRIBUTION_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/ios_distribution.p12"
+          printf '%s' "$IOS_APPSTORE_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/appstore.mobileprovision"
+
+          CLEAN_P12_PASS=$(printf '%s' "$IOS_DISTRIBUTION_P12_PASSWORD" | tr -d '\r\n')
+          echo "IOS_DISTRIBUTION_P12_PASSWORD_CLEAN=$CLEAN_P12_PASS" >> "$GITHUB_ENV"
+          echo "IOS_DISTRIBUTION_P12_PATH=$RUNNER_TEMP/signing/ios_distribution.p12" >> "$GITHUB_ENV"
+          echo "IOS_APPSTORE_PROFILE_PATH=$RUNNER_TEMP/signing/appstore.mobileprovision" >> "$GITHUB_ENV"
+
+      - name: Validate P12 and password
+        run: |
+          openssl pkcs12 -in "$IOS_DISTRIBUTION_P12_PATH" -nokeys -passin "pass:$IOS_DISTRIBUTION_P12_PASSWORD_CLEAN" >/dev/null
+          P12_SHA=$(shasum -a 256 "$IOS_DISTRIBUTION_P12_PATH" | awk '{print $1}')
+          PROFILE_SHA=$(shasum -a 256 "$IOS_APPSTORE_PROFILE_PATH" | awk '{print $1}')
+          echo "Decoded P12 SHA256: $P12_SHA"
+          echo "Decoded Profile SHA256: $PROFILE_SHA"
+
+      - name: Re-export P12 in legacy format
+        run: |
+          openssl pkcs12 -in "$IOS_DISTRIBUTION_P12_PATH" -nodes -passin "pass:$IOS_DISTRIBUTION_P12_PASSWORD_CLEAN" -out "$RUNNER_TEMP/signing/ios_distribution.pem"
+          if openssl pkcs12 -help 2>&1 | grep -q -- "-legacy"; then
+            openssl pkcs12 -export -legacy -in "$RUNNER_TEMP/signing/ios_distribution.pem" -out "$RUNNER_TEMP/signing/ios_distribution_legacy.p12" -passout "pass:$IOS_DISTRIBUTION_P12_PASSWORD_CLEAN"
+          else
+            openssl pkcs12 -export -in "$RUNNER_TEMP/signing/ios_distribution.pem" -out "$RUNNER_TEMP/signing/ios_distribution_legacy.p12" -passout "pass:$IOS_DISTRIBUTION_P12_PASSWORD_CLEAN"
+          fi
+          echo "IOS_DISTRIBUTION_P12_PATH=$RUNNER_TEMP/signing/ios_distribution_legacy.p12" >> "$GITHUB_ENV"
 
       - name: Build and Upload TestFlight
-        working-directory: ios
+        run: |
+          cd ios
+          bundle exec fastlane ci_testflight
         env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
-          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
-          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
-          IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
-        run: bundle exec fastlane testflight
