@@ -33,8 +33,8 @@ platform :ios do
       in_house: false,
     )
 
-    keychain_password = "temp_signing_keychain"
-    setup_ci(keychain_name: "fastlane_tmp_keychain", keychain_password: keychain_password) if ENV["CI"]
+    keychain_password = ""
+    setup_ci(keychain_name: "fastlane_tmp_keychain") if ENV["CI"]
 
     temp_dir = File.join(Dir.tmpdir, "stagelink_signing")
     FileUtils.mkdir_p(temp_dir)
