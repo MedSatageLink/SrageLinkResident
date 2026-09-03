@@ -9,6 +9,7 @@ on:
       - "lib/**"
       - "pubspec.yaml"
       - "pubspec.lock"
+      - "TESTFLIGHT_SETUP_AR.md"
       - ".github/workflows/ios-testflight.yml"
 
 jobs:
