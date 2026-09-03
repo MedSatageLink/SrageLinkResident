@@ -51,5 +51,6 @@ jobs:
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_GIT_BRANCH: ${{ vars.MATCH_GIT_BRANCH }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
         run: bundle exec fastlane testflight
