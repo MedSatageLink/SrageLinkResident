@@ -25,3 +25,5 @@
 
 ## 4) تشغيل الرفع
 - اذهب إلى Actions > iOS TestFlight (Resident) > Run workflow.
+
+> آخر تحديث CI: trigger-from-local-push
