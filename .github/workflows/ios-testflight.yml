@@ -14,8 +14,8 @@ on:
 
 jobs:
   build-and-upload:
-    runs-on: macos-14
-    timeout-minutes: 60
+    runs-on: macos-15
+    timeout-minutes: 90
     env:
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -29,6 +29,44 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode 26+ (required by App Store Connect)
+        run: |
+          if [ -d "/Applications/Xcode_26.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_26.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_25.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_25.4.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_25.3.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_25.3.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_25.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_25.2.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_25.1.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_25.1.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_25.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_25.0.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.3.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.2.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.1.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer
+          elif [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
+          else
+            echo "No known Xcode app found"
+            ls -1 /Applications | grep -E '^Xcode(_|\.app)' || true
+            exit 1
+          fi
+          xcodebuild -version
+
+      - name: Verify SDK requirement
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -E 'iphoneos26|iOS 26' >/dev/null || (echo "Missing iOS 26 SDK on runner. Upload will be rejected by App Store Connect." && exit 1)
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
