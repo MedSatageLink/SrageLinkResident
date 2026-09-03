@@ -43,7 +43,11 @@ platform :ios do
     profile_path = File.join(temp_dir, "appstore.mobileprovision")
     profile_plist = File.join(temp_dir, "profile.plist")
     keychain_path = Actions.lane_context[SharedValues::KEYCHAIN_PATH].to_s
+    keychain_path = File.expand_path(keychain_path) unless keychain_path.empty?
     keychain_path = File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db") if keychain_path.empty?
+    if !File.exist?(keychain_path) && !keychain_path.end_with?("-db") && File.exist?("#{keychain_path}-db")
+      keychain_path = "#{keychain_path}-db"
+    end
 
     File.binwrite(p12_path, Base64.decode64(ENV["IOS_DISTRIBUTION_P12_BASE64"]))
     File.binwrite(profile_path, Base64.decode64(ENV["IOS_APPSTORE_PROFILE_BASE64"]))
