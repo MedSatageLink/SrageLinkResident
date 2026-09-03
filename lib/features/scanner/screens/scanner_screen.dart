@@ -1,12 +1,12 @@
-import 'dart:convert';
+import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:gap/gap.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/attendance_sync_service.dart';
-import 'package:stagelink_resident/core/utils/app_error_message.dart';
+import '../../../core/services/ble_attendance_codec.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
   final String lectureId;
@@ -16,102 +16,181 @@ class ScannerScreen extends ConsumerStatefulWidget {
 }
 
 class _State extends ConsumerState<ScannerScreen> {
-  final MobileScannerController _controller = MobileScannerController();
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<BluetoothAdapterState>? _adapterSub;
+  bool _isScanning = false;
+  bool _isBluetoothOn = false;
   bool _processing = false;
   String? _lastResult;
   bool _lastSuccess = false;
+  final Map<String, DateTime> _recentEvents = <String, DateTime>{};
 
   @override
   void initState() {
     super.initState();
     AttendanceSyncService.instance.syncPendingQueue();
+    _adapterSub = FlutterBluePlus.adapterState.listen((state) {
+      if (!mounted) return;
+      setState(() => _isBluetoothOn = state == BluetoothAdapterState.on);
+    });
+    _startScanning();
   }
 
-  Future<void> _onDetect(BarcodeCapture capture) async {
+  Future<void> _startScanning() async {
+    if (_isScanning) return;
+    try {
+      await FlutterBluePlus.stopScan();
+      _scanSub?.cancel();
+      _scanSub = FlutterBluePlus.onScanResults.listen(
+        _onScanResults,
+        onError: (_) {},
+      );
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(days: 1),
+        androidUsesFineLocation: true,
+      );
+      if (!mounted) return;
+      setState(() => _isScanning = true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _lastResult = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
+        _lastSuccess = false;
+        _isScanning = false;
+      });
+    }
+  }
+
+  Future<void> _stopScanning() async {
+    await FlutterBluePlus.stopScan();
+    await _scanSub?.cancel();
+    _scanSub = null;
+    if (!mounted) return;
+    setState(() => _isScanning = false);
+  }
+
+  Future<void> _onScanResults(List<ScanResult> results) async {
+    if (_processing || results.isEmpty) return;
+
+    for (final result in results) {
+      final payloadBytes = result
+          .advertisementData
+          .manufacturerData[BleAttendanceCodec.manufacturerId];
+      if (payloadBytes == null || payloadBytes.isEmpty) continue;
+
+      final parsed = BleAttendanceCodec.parse(Uint8List.fromList(payloadBytes));
+      if (parsed == null) continue;
+
+      final dedupeKey =
+          '${parsed.studentId}_${widget.lectureId}_${parsed.eventType.value}';
+      final now = DateTime.now();
+      final recentAt = _recentEvents[dedupeKey];
+      if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
+        continue;
+      }
+
+      _recentEvents[dedupeKey] = now;
+      await _processAttendance(
+        studentId: parsed.studentId,
+        eventType: parsed.eventType,
+      );
+      break;
+    }
+  }
+
+  Future<void> _processAttendance({
+    required String studentId,
+    required AttendanceEventType eventType,
+  }) async {
     if (_processing) return;
-    final code = capture.barcodes.firstOrNull?.rawValue;
-    if (code == null) return;
 
     setState(() => _processing = true);
 
     try {
-      final payload = jsonDecode(code) as Map<String, dynamic>;
-      final studentId = payload['student_id'] as String?;
-      final lectureId = payload['lecture_id'] as String?;
-
-      if (studentId == null ||
-          lectureId == null ||
-          lectureId != widget.lectureId) {
-        setState(() {
-          _lastResult = 'رمز QR غير صالح';
-          _lastSuccess = false;
-        });
-        await Future.delayed(const Duration(seconds: 2));
-        setState(() => _processing = false);
-        return;
-      }
-
-      final result = await AttendanceSyncService.instance.processScan(
-        lectureId: lectureId,
-        studentId: studentId,
-      );
+      final result = await AttendanceSyncService.instance
+          .processAttendanceEvent(
+            lectureId: widget.lectureId,
+            studentId: studentId,
+            eventType: eventType,
+          );
 
       setState(() {
         _lastResult = result.message;
         _lastSuccess = result.success;
       });
-    } on PostgrestException catch (e) {
-      final msg = AppErrorMessage.from(e);
+    } catch (_) {
       setState(() {
-        _lastResult = msg;
-        _lastSuccess = false;
-      });
-    } catch (e) {
-      setState(() {
-        _lastResult = AppErrorMessage.from(e);
+        _lastResult = 'فشل تسجيل الحضور، حاول مجدداً';
         _lastSuccess = false;
       });
     } finally {
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(milliseconds: 1400));
       if (mounted) setState(() => _processing = false);
     }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    unawaited(_stopScanning());
+    unawaited(_adapterSub?.cancel());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final statusColor = _isBluetoothOn ? AppColors.success : AppColors.warning;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('مسح رمز QR'),
+        title: const Text('استقبال حضور BLE'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.flash_on_rounded),
-            onPressed: () => _controller.toggleTorch(),
+            icon: Icon(
+              _isScanning
+                  ? Icons.pause_circle_rounded
+                  : Icons.play_circle_rounded,
+            ),
+            onPressed: _isScanning ? _stopScanning : _startScanning,
           ),
         ],
       ),
       body: Stack(
         children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
-
-          // Overlay frame
           Center(
-            child: Container(
-              width: 240,
-              height: 240,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 3),
-                borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.bluetooth_searching_rounded,
+                    size: 90,
+                    color: AppColors.primary,
+                  ),
+                  const Gap(16),
+                  Text(
+                    _isScanning
+                        ? 'قيد استقبال إشارات الحضور من الطلاب'
+                        : 'الاستقبال متوقف',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const Gap(8),
+                  Text(
+                    _isBluetoothOn
+                        ? 'البلوتوث مفعل'
+                        : 'البلوتوث غير مفعل، يرجى تفعيله',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: statusColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           ),
 
-          // Result banner
           if (_lastResult != null)
             Positioned(
               bottom: 32,

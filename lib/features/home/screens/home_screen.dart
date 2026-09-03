@@ -136,7 +136,7 @@ class ResidentHomeScreen extends ConsumerWidget {
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: Icon(
-                            Icons.qr_code_scanner_rounded,
+                            Icons.bluetooth_searching_rounded,
                             color: AppColors.primary,
                             size: 28,
                           ),
@@ -193,7 +193,7 @@ class ResidentHomeScreen extends ConsumerWidget {
                           ),
                         ),
                         const Icon(
-                          Icons.qr_code_scanner_rounded,
+                          Icons.bluetooth_searching_rounded,
                           color: AppColors.primary,
                         ),
                       ],

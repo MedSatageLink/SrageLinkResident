@@ -35,6 +35,16 @@ class AttendanceSyncResult {
   const AttendanceSyncResult(this.success, this.message);
 }
 
+enum AttendanceEventType { checkIn, checkOut }
+
+extension AttendanceEventTypeValue on AttendanceEventType {
+  String get value =>
+      this == AttendanceEventType.checkIn ? 'check_in' : 'check_out';
+
+  String get arabicLabel =>
+      this == AttendanceEventType.checkIn ? 'تسجيل الدخول' : 'تسجيل الخروج';
+}
+
 class AttendanceSyncService {
   AttendanceSyncService._();
   static final AttendanceSyncService instance = AttendanceSyncService._();
@@ -51,9 +61,10 @@ class AttendanceSyncService {
     );
   }
 
-  Future<AttendanceSyncResult> processScan({
+  Future<AttendanceSyncResult> processAttendanceEvent({
     required String lectureId,
     required String studentId,
+    required AttendanceEventType eventType,
   }) async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) {
@@ -66,6 +77,7 @@ class AttendanceSyncService {
       'lecture_id': lectureId,
       'student_id': studentId,
       'resident_id': uid,
+      'event_type': eventType.value,
       'scanned_local_at': DateTime.now().toUtc().toIso8601String(),
       'queued_at': DateTime.now().toUtc().toIso8601String(),
     };
@@ -73,25 +85,41 @@ class AttendanceSyncService {
     try {
       final result = await _submitAttempt(payload);
       final status = result['status'] as String? ?? '';
-      if (status == 'accepted') {
-        return const AttendanceSyncResult(true, 'تم تسجيل الحضور ✓');
+      if (status == 'accepted_check_in') {
+        return const AttendanceSyncResult(true, 'تم تسجيل الدخول ✓');
+      }
+      if (status == 'accepted_check_out') {
+        return const AttendanceSyncResult(true, 'تم تسجيل الخروج ✓');
+      }
+      if (status == 'already_checked_in') {
+        return const AttendanceSyncResult(false, 'تم تسجيل الدخول مسبقاً');
+      }
+      if (status == 'already_checked_out') {
+        return const AttendanceSyncResult(false, 'تم تسجيل الخروج مسبقاً');
       }
       if (status == 'duplicate') {
-        return const AttendanceSyncResult(false, 'تم تسجيل هذا الطالب مسبقاً');
+        return const AttendanceSyncResult(false, 'تم تسجيل هذا الحدث مسبقاً');
       }
-      if (status == 'queued_for_approval') {
+      final serverMessage = result['message'] as String?;
+      if (serverMessage == 'missing_check_in') {
         return const AttendanceSyncResult(
-          true,
-          'تم حفظ المسح كحالة متأخرة بانتظار موافقة الإدارة',
+          false,
+          'لا يمكن تسجيل الخروج قبل تسجيل الدخول',
         );
       }
-      final msg = result['message'] as String?;
+      if (status == 'queued_for_approval') {
+        return AttendanceSyncResult(
+          true,
+          'تم حفظ ${eventType.arabicLabel} كحالة متأخرة بانتظار موافقة الإدارة',
+        );
+      }
+      final msg = serverMessage;
       return AttendanceSyncResult(false, msg ?? 'فشل التسجيل');
     } catch (_) {
       await _enqueueLocal(payload);
-      return const AttendanceSyncResult(
+      return AttendanceSyncResult(
         true,
-        'تم حفظ المسح محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
+        'تم حفظ ${eventType.arabicLabel} محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
       );
     }
   }
@@ -105,9 +133,15 @@ class AttendanceSyncService {
       try {
         final result = await _submitAttempt(item);
         final status = result['status'] as String? ?? '';
-        if (status == 'accepted' ||
+        if (status == 'accepted_check_in' ||
+            status == 'accepted_check_out' ||
+            status == 'already_checked_in' ||
+            status == 'already_checked_out' ||
             status == 'duplicate' ||
             status == 'queued_for_approval') {
+          continue;
+        }
+        if ((result['message'] as String?) == 'missing_check_in') {
           continue;
         }
         remaining.add(item);
@@ -121,10 +155,11 @@ class AttendanceSyncService {
 
   Future<Map<String, dynamic>> _submitAttempt(Map<String, dynamic> item) async {
     final res = await Supabase.instance.client.rpc(
-      'submit_practical_scan_attempt',
+      'submit_practical_attendance_event',
       params: {
         'p_lecture_id': item['lecture_id'],
         'p_student_id': item['student_id'],
+        'p_event_type': item['event_type'] ?? 'check_in',
         'p_idempotency_key': item['idempotency_key'],
         'p_scanned_local_at': item['scanned_local_at'],
       },
@@ -137,7 +172,8 @@ class AttendanceSyncService {
     final exists = queue.any(
       (q) =>
           q['lecture_id'] == item['lecture_id'] &&
-          q['student_id'] == item['student_id'],
+          q['student_id'] == item['student_id'] &&
+          q['event_type'] == item['event_type'],
     );
     if (!exists) {
       queue.add(item);
