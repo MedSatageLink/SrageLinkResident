@@ -24,6 +24,7 @@ class _State extends ConsumerState<ScannerScreen> {
   String? _lastResult;
   bool _lastSuccess = false;
   final Map<String, DateTime> _recentEvents = <String, DateTime>{};
+  int _ignoredBleFrames = 0;
 
   @override
   void initState() {
@@ -72,7 +73,8 @@ class _State extends ConsumerState<ScannerScreen> {
       final text = e.toString();
       var msg = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
       if (text.contains('permission') || text.contains('Permission')) {
-        msg = 'لا توجد صلاحية كافية للبلوتوث. فعّل Nearby devices/Location ثم أعد المحاولة';
+        msg =
+            'لا توجد صلاحية كافية للبلوتوث. فعّل Nearby devices/Location ثم أعد المحاولة';
       } else if (text.contains('off') || text.contains('Off')) {
         msg = 'البلوتوث غير مفعل، يرجى تفعيله أولاً';
       }
@@ -97,13 +99,73 @@ class _State extends ConsumerState<ScannerScreen> {
     if (_processing || results.isEmpty) return;
 
     for (final result in results) {
-      final payloadBytes = result
-          .advertisementData
-          .manufacturerData[BleAttendanceCodec.manufacturerId];
-      if (payloadBytes == null || payloadBytes.isEmpty) continue;
+      final manufacturerMap = result.advertisementData.manufacturerData;
+      final serviceDataMap = result.advertisementData.serviceData;
+      final rawServiceUuids = result.advertisementData.serviceUuids;
 
-      final parsed = BleAttendanceCodec.parse(Uint8List.fromList(payloadBytes));
-      if (parsed == null) continue;
+      final serviceUuidStrings = <String>[];
+      for (final uuid in rawServiceUuids) {
+        final text = uuid.toString();
+        if (text.isNotEmpty) serviceUuidStrings.add(text);
+      }
+
+      final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
+        serviceUuidStrings,
+      );
+      if (fromServiceUuids != null) {
+        final dedupeKey =
+            '${fromServiceUuids.studentId}_${widget.lectureId}_${fromServiceUuids.eventType.value}';
+        final now = DateTime.now();
+        final recentAt = _recentEvents[dedupeKey];
+        if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
+          continue;
+        }
+
+        _recentEvents[dedupeKey] = now;
+        await _processAttendance(
+          studentId: fromServiceUuids.studentId,
+          eventType: fromServiceUuids.eventType,
+        );
+        break;
+      }
+
+      if (manufacturerMap.isEmpty && serviceDataMap.isEmpty) {
+        _ignoredBleFrames++;
+        continue;
+      }
+
+      final candidates = <List<int>>[];
+      final expected = manufacturerMap[BleAttendanceCodec.manufacturerId];
+      if (expected != null && expected.isNotEmpty) {
+        candidates.add(expected);
+      }
+      for (final entry in manufacturerMap.entries) {
+        if (entry.value.isNotEmpty) {
+          candidates.add(entry.value);
+        }
+      }
+      for (final entry in serviceDataMap.entries) {
+        if (entry.value.isNotEmpty) {
+          candidates.add(entry.value);
+        }
+      }
+
+      ({String studentId, AttendanceEventType eventType})? parsed;
+      for (final bytes in candidates) {
+        parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
+        if (parsed != null) break;
+      }
+      if (parsed == null) {
+        _ignoredBleFrames++;
+        if (mounted && _ignoredBleFrames % 20 == 0) {
+          setState(() {
+            _lastResult =
+                'تم التقاط إشارات BLE، لكن ليست بصيغة حضور الطالب المتوقعة';
+            _lastSuccess = false;
+          });
+        }
+        continue;
+      }
 
       final dedupeKey =
           '${parsed.studentId}_${widget.lectureId}_${parsed.eventType.value}';
