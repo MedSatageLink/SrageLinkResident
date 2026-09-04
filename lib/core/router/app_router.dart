@@ -8,7 +8,6 @@ import '../../features/scanner/screens/scanner_screen.dart';
 import '../../features/lectures/screens/my_lectures_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/videos/screens/create_practical_video_screen.dart';
-import '../services/attendance_sync_service.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -25,16 +24,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/', builder: (_, _) => const ResidentHomeScreen()),
       GoRoute(
         path: '/scan/:lectureId',
-        builder: (_, state) {
-          final rawMode = state.uri.queryParameters['mode'];
-          final initialMode = rawMode == 'check_out'
-              ? AttendanceEventType.checkOut
-              : AttendanceEventType.checkIn;
-          return ScannerScreen(
-            lectureId: state.pathParameters['lectureId']!,
-            initialMode: initialMode,
-          );
-        },
+        builder: (_, state) =>
+            ScannerScreen(lectureId: state.pathParameters['lectureId']!),
       ),
       GoRoute(
         path: '/my-lectures',

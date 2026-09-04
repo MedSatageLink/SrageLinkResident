@@ -10,12 +10,7 @@ import '../../../core/services/ble_attendance_codec.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
   final String lectureId;
-  final AttendanceEventType? initialMode;
-  const ScannerScreen({
-    super.key,
-    required this.lectureId,
-    this.initialMode,
-  });
+  const ScannerScreen({super.key, required this.lectureId});
   @override
   ConsumerState<ScannerScreen> createState() => _State();
 }
@@ -31,7 +26,7 @@ class _State extends ConsumerState<ScannerScreen> {
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   bool _isScanning = false;
   bool _isBluetoothOn = false;
-  AttendanceEventType _mode = AttendanceEventType.checkIn;
+  AttendanceEventType? _mode;
   int _acceptedCount = 0;
   int _rejectedCount = 0;
   final Map<String, DateTime> _recentEvents = <String, DateTime>{};
@@ -108,7 +103,6 @@ class _State extends ConsumerState<ScannerScreen> {
     }
     if (normalized.isEmpty) return null;
 
-
     for (final uuid in normalized) {
       if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
         continue;
@@ -123,13 +117,11 @@ class _State extends ConsumerState<ScannerScreen> {
   @override
   void initState() {
     super.initState();
-    _mode = widget.initialMode ?? AttendanceEventType.checkIn;
     AttendanceSyncService.instance.syncPendingQueue();
     _adapterSub = FlutterBluePlus.adapterState.listen((state) {
       if (!mounted) return;
       setState(() => _isBluetoothOn = state == BluetoothAdapterState.on);
     });
-    _startScanning();
   }
 
   Future<void> _startScanning() async {
@@ -191,6 +183,9 @@ class _State extends ConsumerState<ScannerScreen> {
       _inFlightKeys.clear();
     });
     _log('mode switched to ${mode.value}; counters reset');
+    if (!_isScanning) {
+      unawaited(_startScanning());
+    }
   }
 
   Future<void> _stopScanning() async {
@@ -204,6 +199,8 @@ class _State extends ConsumerState<ScannerScreen> {
 
   Future<void> _onScanResults(List<ScanResult> results) async {
     if (results.isEmpty) return;
+    if (_mode == null) return;
+    final mode = _mode!;
     _log('onScanResults batch size=${results.length}');
 
     for (final result in results) {
@@ -224,16 +221,14 @@ class _State extends ConsumerState<ScannerScreen> {
       final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
         serviceUuidStrings,
       );
-        final String? parsedService =
-          (fromServiceUuids == null
-              ? _parseServiceUuidsHeuristic(serviceUuidStrings)
-              : fromServiceUuids);
+      final String? parsedService = (fromServiceUuids == null
+          ? _parseServiceUuidsHeuristic(serviceUuidStrings)
+          : fromServiceUuids);
       if (parsedService != null) {
         _log(
-          'parsed from serviceUuids => studentId=$parsedService, eventType=${_mode.value}',
+          'parsed from serviceUuids => studentId=$parsedService, eventType=${mode.value}',
         );
-        final dedupeKey =
-            '${parsedService}_${widget.lectureId}_${_mode.value}';
+        final dedupeKey = '${parsedService}_${widget.lectureId}_${mode.value}';
         final now = DateTime.now();
         final recentAt = _recentEvents[dedupeKey];
         if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
@@ -243,10 +238,7 @@ class _State extends ConsumerState<ScannerScreen> {
 
         _recentEvents[dedupeKey] = now;
         _log('event accepted from serviceUuids, sending to processAttendance');
-        await _processAttendance(
-          studentId: parsedService,
-          eventType: _mode,
-        );
+        await _processAttendance(studentId: parsedService, eventType: mode);
         break;
       }
 
@@ -297,7 +289,7 @@ class _State extends ConsumerState<ScannerScreen> {
         parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
         if (parsed != null) {
           _log(
-            'candidate[$i] parsed OK => studentId=$parsed, eventType=${_mode.value}',
+            'candidate[$i] parsed OK => studentId=$parsed, eventType=${mode.value}',
           );
           break;
         }
@@ -309,8 +301,7 @@ class _State extends ConsumerState<ScannerScreen> {
         continue;
       }
 
-      final dedupeKey =
-          '${parsed}_${widget.lectureId}_${_mode.value}';
+      final dedupeKey = '${parsed}_${widget.lectureId}_${mode.value}';
       final now = DateTime.now();
       final recentAt = _recentEvents[dedupeKey];
       if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
@@ -320,10 +311,7 @@ class _State extends ConsumerState<ScannerScreen> {
 
       _recentEvents[dedupeKey] = now;
       _log('event accepted from byte payload, sending to processAttendance');
-      await _processAttendance(
-        studentId: parsed,
-        eventType: _mode,
-      );
+      await _processAttendance(studentId: parsed, eventType: mode);
       break;
     }
   }
@@ -390,17 +378,26 @@ class _State extends ConsumerState<ScannerScreen> {
   Widget build(BuildContext context) {
     final statusColor = _isBluetoothOn ? AppColors.success : AppColors.warning;
     final isCheckInMode = _mode == AttendanceEventType.checkIn;
+    final isCheckOutMode = _mode == AttendanceEventType.checkOut;
     final acceptedLabel = isCheckInMode
-      ? 'تم تسجيل الدخول'
-      : 'تم تسجيل الخروج';
+        ? 'تم تسجيل الدخول'
+        : isCheckOutMode
+        ? 'تم تسجيل الخروج'
+        : 'تم قبول الطلب';
     final rejectedLabel = isCheckInMode
-      ? 'مرفوض (دخل سابقاً)'
-      : 'مرفوض (خرج سابقاً)';
+        ? 'مرفوض (دخل سابقاً)'
+        : isCheckOutMode
+        ? 'مرفوض (خرج سابقاً)'
+        : 'طلبات مرفوضة';
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          isCheckInMode ? 'استقبال تسجيل الدخول' : 'استقبال تسجيل الخروج',
+          isCheckInMode
+              ? 'استقبال تسجيل الدخول'
+              : isCheckOutMode
+              ? 'استقبال تسجيل الخروج'
+              : 'اختر وضع الاستقبال',
         ),
         actions: [
           IconButton(
@@ -409,7 +406,9 @@ class _State extends ConsumerState<ScannerScreen> {
                   ? Icons.pause_circle_rounded
                   : Icons.play_circle_rounded,
             ),
-            onPressed: _isScanning ? _stopScanning : _startScanning,
+            onPressed: _mode == null
+                ? null
+                : (_isScanning ? _stopScanning : _startScanning),
           ),
         ],
       ),
@@ -423,26 +422,38 @@ class _State extends ConsumerState<ScannerScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () => _switchMode(AttendanceEventType.checkIn),
+                        onPressed: () =>
+                            _switchMode(AttendanceEventType.checkIn),
                         icon: const Icon(Icons.login_rounded),
                         label: const Text('تسجيل دخول'),
                         style: OutlinedButton.styleFrom(
                           backgroundColor: isCheckInMode
-                              ? AppColors.primary.withValues(alpha: 0.08)
-                              : null,
+                              ? AppColors.success.withValues(alpha: 0.16)
+                              : Colors.grey.withValues(alpha: 0.12),
+                          side: BorderSide(
+                            color: isCheckInMode
+                                ? AppColors.success
+                                : Colors.grey,
+                          ),
                         ),
                       ),
                     ),
                     const Gap(10),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () => _switchMode(AttendanceEventType.checkOut),
+                        onPressed: () =>
+                            _switchMode(AttendanceEventType.checkOut),
                         icon: const Icon(Icons.logout_rounded),
                         label: const Text('تسجيل خروج'),
                         style: OutlinedButton.styleFrom(
-                          backgroundColor: !isCheckInMode
-                              ? AppColors.primary.withValues(alpha: 0.08)
-                              : null,
+                          backgroundColor: isCheckOutMode
+                              ? AppColors.success.withValues(alpha: 0.16)
+                              : Colors.grey.withValues(alpha: 0.12),
+                          side: BorderSide(
+                            color: isCheckOutMode
+                                ? AppColors.success
+                                : Colors.grey,
+                          ),
                         ),
                       ),
                     ),

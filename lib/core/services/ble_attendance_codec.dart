@@ -2,8 +2,10 @@ import 'dart:typed_data';
 
 class BleAttendanceCodec {
   static const int manufacturerId = 0x1234;
-  static const String _checkInServiceUuid = '0000a101-0000-1000-8000-00805f9b34fb';
-  static const String _checkOutServiceUuid = '0000a102-0000-1000-8000-00805f9b34fb';
+  static const String _checkInServiceUuid =
+      '0000a101-0000-1000-8000-00805f9b34fb';
+  static const String _checkOutServiceUuid =
+      '0000a102-0000-1000-8000-00805f9b34fb';
 
   static String? parse(Uint8List bytes) {
     if (bytes.length < 17) return null;
@@ -23,9 +25,7 @@ class BleAttendanceCodec {
     return null;
   }
 
-  static String? parseServiceUuids(
-    Iterable<String> serviceUuids,
-  ) {
+  static String? parseServiceUuids(Iterable<String> serviceUuids) {
     final normalized = <String>[];
     for (final uuid in serviceUuids) {
       final n = _tryNormalizeUuid(uuid);

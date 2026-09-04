@@ -33,7 +33,11 @@ class AttendanceSyncResult {
   final bool success;
   final String message;
   final String status;
-  const AttendanceSyncResult(this.success, this.message, {required this.status});
+  const AttendanceSyncResult(
+    this.success,
+    this.message, {
+    required this.status,
+  });
 }
 
 enum AttendanceEventType { checkIn, checkOut }

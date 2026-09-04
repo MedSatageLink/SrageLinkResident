@@ -170,9 +170,8 @@ class MyLecturesScreen extends ConsumerWidget {
                               children: [
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: () => context.push(
-                                      '/scan/${l['id']}?mode=check_in',
-                                    ),
+                                    onPressed: () =>
+                                        context.push('/scan/${l['id']}'),
                                     icon: const Icon(Icons.login_rounded),
                                     label: const Text('تسجيل دخول'),
                                   ),
@@ -180,9 +179,8 @@ class MyLecturesScreen extends ConsumerWidget {
                                 const Gap(8),
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: () => context.push(
-                                      '/scan/${l['id']}?mode=check_out',
-                                    ),
+                                    onPressed: () =>
+                                        context.push('/scan/${l['id']}'),
                                     icon: const Icon(Icons.logout_rounded),
                                     label: const Text('تسجيل خروج'),
                                   ),
