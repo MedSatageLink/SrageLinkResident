@@ -32,7 +32,8 @@ void attendanceSyncCallbackDispatcher() {
 class AttendanceSyncResult {
   final bool success;
   final String message;
-  const AttendanceSyncResult(this.success, this.message);
+  final String status;
+  const AttendanceSyncResult(this.success, this.message, {required this.status});
 }
 
 enum AttendanceEventType { checkIn, checkOut }
@@ -68,7 +69,11 @@ class AttendanceSyncService {
   }) async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) {
-      return const AttendanceSyncResult(false, 'غير مسجل الدخول');
+      return const AttendanceSyncResult(
+        false,
+        'غير مسجل الدخول',
+        status: 'not_logged_in',
+      );
     }
 
     final payload = {
@@ -86,40 +91,67 @@ class AttendanceSyncService {
       final result = await _submitAttempt(payload);
       final status = result['status'] as String? ?? '';
       if (status == 'accepted_check_in') {
-        return const AttendanceSyncResult(true, 'تم تسجيل الدخول ✓');
+        return const AttendanceSyncResult(
+          true,
+          'تم تسجيل الدخول ✓',
+          status: 'accepted_check_in',
+        );
       }
       if (status == 'accepted_check_out') {
-        return const AttendanceSyncResult(true, 'تم تسجيل الخروج ✓');
+        return const AttendanceSyncResult(
+          true,
+          'تم تسجيل الخروج ✓',
+          status: 'accepted_check_out',
+        );
       }
       if (status == 'already_checked_in') {
-        return const AttendanceSyncResult(false, 'تم تسجيل الدخول مسبقاً');
+        return const AttendanceSyncResult(
+          false,
+          'تم تسجيل الدخول مسبقاً',
+          status: 'already_checked_in',
+        );
       }
       if (status == 'already_checked_out') {
-        return const AttendanceSyncResult(false, 'تم تسجيل الخروج مسبقاً');
+        return const AttendanceSyncResult(
+          false,
+          'تم تسجيل الخروج مسبقاً',
+          status: 'already_checked_out',
+        );
       }
       if (status == 'duplicate') {
-        return const AttendanceSyncResult(false, 'تم تسجيل هذا الحدث مسبقاً');
+        return const AttendanceSyncResult(
+          false,
+          'تم تسجيل هذا الحدث مسبقاً',
+          status: 'duplicate',
+        );
       }
       final serverMessage = result['message'] as String?;
       if (serverMessage == 'missing_check_in') {
         return const AttendanceSyncResult(
           false,
           'لا يمكن تسجيل الخروج قبل تسجيل الدخول',
+          status: 'missing_check_in',
         );
       }
       if (status == 'queued_for_approval') {
         return AttendanceSyncResult(
           true,
           'تم حفظ ${eventType.arabicLabel} كحالة متأخرة بانتظار موافقة الإدارة',
+          status: 'queued_for_approval',
         );
       }
       final msg = serverMessage;
-      return AttendanceSyncResult(false, msg ?? 'فشل التسجيل');
+      return AttendanceSyncResult(
+        false,
+        msg ?? 'فشل التسجيل',
+        status: status.isEmpty ? 'failed' : status,
+      );
     } catch (_) {
       await _enqueueLocal(payload);
       return AttendanceSyncResult(
         true,
         'تم حفظ ${eventType.arabicLabel} محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
+        status: 'queued_local',
       );
     }
   }

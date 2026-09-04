@@ -1,43 +1,29 @@
 import 'dart:typed_data';
 
-import 'attendance_sync_service.dart';
-
 class BleAttendanceCodec {
   static const int manufacturerId = 0x1234;
-  static const String _checkInServiceUuid =
-      '0000a101-0000-1000-8000-00805f9b34fb';
-  static const String _checkOutServiceUuid =
-      '0000a102-0000-1000-8000-00805f9b34fb';
+  static const String _checkInServiceUuid = '0000a101-0000-1000-8000-00805f9b34fb';
+  static const String _checkOutServiceUuid = '0000a102-0000-1000-8000-00805f9b34fb';
 
-  static Uint8List buildManufacturerData({
-    required String studentId,
-    required AttendanceEventType eventType,
-  }) {
-    final studentBytes = _uuidToBytes(studentId);
-    final eventByte = eventType == AttendanceEventType.checkIn ? 1 : 2;
-    return Uint8List.fromList(<int>[1, eventByte, ...studentBytes]);
+  static String? parse(Uint8List bytes) {
+    if (bytes.length < 17) return null;
+    if (bytes[0] != 1) return null;
+
+    // Legacy fallback (older app builds): [1, event, uuid16]
+    if (bytes.length >= 18 && (bytes[1] == 1 || bytes[1] == 2)) {
+      final legacy = bytes.sublist(2, 18);
+      return _bytesToUuid(legacy);
+    }
+
+    // New format: [1, uuid16]
+    if (bytes.length >= 17) {
+      final direct = bytes.sublist(1, 17);
+      return _bytesToUuid(direct);
+    }
+    return null;
   }
 
-  static ({String studentId, AttendanceEventType eventType})? parse(
-    Uint8List bytes,
-  ) {
-    if (bytes.length < 18) return null;
-    final version = bytes[0];
-    if (version != 1) return null;
-
-    final eventType = switch (bytes[1]) {
-      1 => AttendanceEventType.checkIn,
-      2 => AttendanceEventType.checkOut,
-      _ => null,
-    };
-    if (eventType == null) return null;
-
-    final studentBytes = bytes.sublist(2, 18);
-    final studentId = _bytesToUuid(studentBytes);
-    return (studentId: studentId, eventType: eventType);
-  }
-
-  static ({String studentId, AttendanceEventType eventType})? parseServiceUuids(
+  static String? parseServiceUuids(
     Iterable<String> serviceUuids,
   ) {
     final normalized = <String>[];
@@ -47,31 +33,13 @@ class BleAttendanceCodec {
     }
     if (normalized.isEmpty) return null;
 
-    final eventType = normalized.contains(_checkInServiceUuid)
-        ? AttendanceEventType.checkIn
-        : normalized.contains(_checkOutServiceUuid)
-        ? AttendanceEventType.checkOut
-      : AttendanceEventType.checkIn;
-
     for (final uuid in normalized) {
       if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
         continue;
       }
-      return (studentId: uuid, eventType: eventType);
+      return uuid;
     }
     return null;
-  }
-
-  static Uint8List _uuidToBytes(String uuid) {
-    final clean = uuid.replaceAll('-', '').toLowerCase();
-    if (clean.length != 32) {
-      throw const FormatException('Invalid UUID');
-    }
-    final out = Uint8List(16);
-    for (var i = 0; i < 16; i++) {
-      out[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
-    }
-    return out;
   }
 
   static String _bytesToUuid(List<int> bytes) {

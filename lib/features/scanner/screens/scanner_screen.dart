@@ -10,7 +10,12 @@ import '../../../core/services/ble_attendance_codec.dart';
 
 class ScannerScreen extends ConsumerStatefulWidget {
   final String lectureId;
-  const ScannerScreen({super.key, required this.lectureId});
+  final AttendanceEventType? initialMode;
+  const ScannerScreen({
+    super.key,
+    required this.lectureId,
+    this.initialMode,
+  });
   @override
   ConsumerState<ScannerScreen> createState() => _State();
 }
@@ -26,10 +31,11 @@ class _State extends ConsumerState<ScannerScreen> {
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   bool _isScanning = false;
   bool _isBluetoothOn = false;
-  bool _processing = false;
-  String? _lastResult;
-  bool _lastSuccess = false;
+  AttendanceEventType _mode = AttendanceEventType.checkIn;
+  int _acceptedCount = 0;
+  int _rejectedCount = 0;
   final Map<String, DateTime> _recentEvents = <String, DateTime>{};
+  final Set<String> _inFlightKeys = <String>{};
   int _ignoredBleFrames = 0;
 
   void _log(String message) {
@@ -94,9 +100,7 @@ class _State extends ConsumerState<ScannerScreen> {
     return '${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}';
   }
 
-  ({String studentId, AttendanceEventType eventType})? _parseServiceUuidsHeuristic(
-    List<String> serviceUuids,
-  ) {
+  String? _parseServiceUuidsHeuristic(List<String> serviceUuids) {
     final normalized = <String>[];
     for (final raw in serviceUuids) {
       final n = _normalizeUuidOrNull(raw);
@@ -104,16 +108,12 @@ class _State extends ConsumerState<ScannerScreen> {
     }
     if (normalized.isEmpty) return null;
 
-    final hasCheckOut = normalized.contains(_checkOutServiceUuid);
-    final eventType = hasCheckOut
-        ? AttendanceEventType.checkOut
-        : AttendanceEventType.checkIn;
 
     for (final uuid in normalized) {
       if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
         continue;
       }
-      return (studentId: uuid, eventType: eventType);
+      return uuid;
     }
 
     // If only event UUID is present, we still cannot identify a student.
@@ -123,6 +123,7 @@ class _State extends ConsumerState<ScannerScreen> {
   @override
   void initState() {
     super.initState();
+    _mode = widget.initialMode ?? AttendanceEventType.checkIn;
     AttendanceSyncService.instance.syncPendingQueue();
     _adapterSub = FlutterBluePlus.adapterState.listen((state) {
       if (!mounted) return;
@@ -138,11 +139,7 @@ class _State extends ConsumerState<ScannerScreen> {
       if (!await FlutterBluePlus.isSupported) {
         _log('BLE not supported on this device');
         if (!mounted) return;
-        setState(() {
-          _lastResult = 'هذا الجهاز لا يدعم BLE';
-          _lastSuccess = false;
-          _isScanning = false;
-        });
+        setState(() => _isScanning = false);
         return;
       }
 
@@ -172,20 +169,28 @@ class _State extends ConsumerState<ScannerScreen> {
     } catch (e) {
       _log('scan start failed: $e');
       final text = e.toString();
-      var msg = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
       if (text.contains('permission') || text.contains('Permission')) {
-        msg =
-            'لا توجد صلاحية كافية للبلوتوث. فعّل Nearby devices/Location ثم أعد المحاولة';
+        _log('scan failed due to missing permission');
       } else if (text.contains('off') || text.contains('Off')) {
-        msg = 'البلوتوث غير مفعل، يرجى تفعيله أولاً';
+        _log('scan failed because bluetooth seems OFF');
       }
       if (!mounted) return;
       setState(() {
-        _lastResult = '$msg\n($text)';
-        _lastSuccess = false;
         _isScanning = false;
       });
     }
+  }
+
+  void _switchMode(AttendanceEventType mode) {
+    if (_mode == mode) return;
+    setState(() {
+      _mode = mode;
+      _acceptedCount = 0;
+      _rejectedCount = 0;
+      _recentEvents.clear();
+      _inFlightKeys.clear();
+    });
+    _log('mode switched to ${mode.value}; counters reset');
   }
 
   Future<void> _stopScanning() async {
@@ -198,8 +203,8 @@ class _State extends ConsumerState<ScannerScreen> {
   }
 
   Future<void> _onScanResults(List<ScanResult> results) async {
-    if (_processing || results.isEmpty) return;
-    _log('onScanResults batch size=${results.length}, processing=$_processing');
+    if (results.isEmpty) return;
+    _log('onScanResults batch size=${results.length}');
 
     for (final result in results) {
       _logAdvertisement(result);
@@ -219,15 +224,16 @@ class _State extends ConsumerState<ScannerScreen> {
       final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
         serviceUuidStrings,
       );
-      final parsedService =
-          fromServiceUuids ?? _parseServiceUuidsHeuristic(serviceUuidStrings);
+        final String? parsedService =
+          (fromServiceUuids == null
+              ? _parseServiceUuidsHeuristic(serviceUuidStrings)
+              : fromServiceUuids);
       if (parsedService != null) {
         _log(
-          'parsed from serviceUuids => studentId=${parsedService.studentId}, '
-          'eventType=${parsedService.eventType.value}',
+          'parsed from serviceUuids => studentId=$parsedService, eventType=${_mode.value}',
         );
         final dedupeKey =
-            '${parsedService.studentId}_${widget.lectureId}_${parsedService.eventType.value}';
+            '${parsedService}_${widget.lectureId}_${_mode.value}';
         final now = DateTime.now();
         final recentAt = _recentEvents[dedupeKey];
         if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
@@ -238,8 +244,8 @@ class _State extends ConsumerState<ScannerScreen> {
         _recentEvents[dedupeKey] = now;
         _log('event accepted from serviceUuids, sending to processAttendance');
         await _processAttendance(
-          studentId: parsedService.studentId,
-          eventType: parsedService.eventType,
+          studentId: parsedService,
+          eventType: _mode,
         );
         break;
       }
@@ -284,15 +290,14 @@ class _State extends ConsumerState<ScannerScreen> {
 
       _log('total raw-byte candidates count=${candidates.length}');
 
-      ({String studentId, AttendanceEventType eventType})? parsed;
+      String? parsed;
       for (var i = 0; i < candidates.length; i++) {
         final bytes = candidates[i];
         _log('trying candidate[$i] len=${bytes.length} hex=${_hex(bytes)}');
         parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
         if (parsed != null) {
           _log(
-            'candidate[$i] parsed OK => studentId=${parsed.studentId}, '
-            'eventType=${parsed.eventType.value}',
+            'candidate[$i] parsed OK => studentId=$parsed, eventType=${_mode.value}',
           );
           break;
         }
@@ -301,18 +306,11 @@ class _State extends ConsumerState<ScannerScreen> {
       if (parsed == null) {
         _ignoredBleFrames++;
         _log('all candidates failed parsing; ignoredFrames=$_ignoredBleFrames');
-        if (mounted && _ignoredBleFrames % 20 == 0) {
-          setState(() {
-            _lastResult =
-                'تم التقاط إشارات BLE، لكن ليست بصيغة حضور الطالب المتوقعة';
-            _lastSuccess = false;
-          });
-        }
         continue;
       }
 
       final dedupeKey =
-          '${parsed.studentId}_${widget.lectureId}_${parsed.eventType.value}';
+          '${parsed}_${widget.lectureId}_${_mode.value}';
       final now = DateTime.now();
       final recentAt = _recentEvents[dedupeKey];
       if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
@@ -323,8 +321,8 @@ class _State extends ConsumerState<ScannerScreen> {
       _recentEvents[dedupeKey] = now;
       _log('event accepted from byte payload, sending to processAttendance');
       await _processAttendance(
-        studentId: parsed.studentId,
-        eventType: parsed.eventType,
+        studentId: parsed,
+        eventType: _mode,
       );
       break;
     }
@@ -334,14 +332,14 @@ class _State extends ConsumerState<ScannerScreen> {
     required String studentId,
     required AttendanceEventType eventType,
   }) async {
-    if (_processing) return;
+    final opKey = '${studentId}_${eventType.value}';
+    if (_inFlightKeys.contains(opKey)) return;
+    _inFlightKeys.add(opKey);
 
     _log(
       'processAttendance started: lectureId=${widget.lectureId}, '
       'studentId=$studentId, eventType=${eventType.value}',
     );
-
-    setState(() => _processing = true);
 
     try {
       final result = await AttendanceSyncService.instance
@@ -353,22 +351,31 @@ class _State extends ConsumerState<ScannerScreen> {
 
       _log(
         'processAttendance result: success=${result.success}, '
-        'message="${result.message}"',
+        'status=${result.status}, message="${result.message}"',
       );
 
-      setState(() {
-        _lastResult = result.message;
-        _lastSuccess = result.success;
-      });
+      final acceptedStatuses = <String>{
+        'accepted_check_in',
+        'accepted_check_out',
+        'queued_for_approval',
+        'queued_local',
+      };
+      if (mounted) {
+        setState(() {
+          if (acceptedStatuses.contains(result.status)) {
+            _acceptedCount++;
+          } else {
+            _rejectedCount++;
+          }
+        });
+      }
     } catch (e) {
       _log('processAttendance exception: $e');
-      setState(() {
-        _lastResult = 'فشل تسجيل الحضور، حاول مجدداً';
-        _lastSuccess = false;
-      });
+      if (mounted) {
+        setState(() => _rejectedCount++);
+      }
     } finally {
-      await Future.delayed(const Duration(milliseconds: 1400));
-      if (mounted) setState(() => _processing = false);
+      _inFlightKeys.remove(opKey);
     }
   }
 
@@ -382,10 +389,19 @@ class _State extends ConsumerState<ScannerScreen> {
   @override
   Widget build(BuildContext context) {
     final statusColor = _isBluetoothOn ? AppColors.success : AppColors.warning;
+    final isCheckInMode = _mode == AttendanceEventType.checkIn;
+    final acceptedLabel = isCheckInMode
+      ? 'تم تسجيل الدخول'
+      : 'تم تسجيل الخروج';
+    final rejectedLabel = isCheckInMode
+      ? 'مرفوض (دخل سابقاً)'
+      : 'مرفوض (خرج سابقاً)';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('استقبال حضور BLE'),
+        title: Text(
+          isCheckInMode ? 'استقبال تسجيل الدخول' : 'استقبال تسجيل الخروج',
+        ),
         actions: [
           IconButton(
             icon: Icon(
@@ -399,91 +415,130 @@ class _State extends ConsumerState<ScannerScreen> {
       ),
       body: Stack(
         children: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.bluetooth_searching_rounded,
-                    size: 90,
-                    color: AppColors.primary,
-                  ),
-                  const Gap(16),
-                  Text(
-                    _isScanning
-                        ? 'قيد استقبال إشارات الحضور من الطلاب'
-                        : 'الاستقبال متوقف',
-                    style: Theme.of(context).textTheme.titleMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const Gap(8),
-                  Text(
-                    _isBluetoothOn
-                        ? 'البلوتوث مفعل'
-                        : 'البلوتوث غير مفعل، يرجى تفعيله',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: statusColor,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          if (_lastResult != null)
-            Positioned(
-              bottom: 32,
-              left: 16,
-              right: 16,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _lastSuccess ? AppColors.success : AppColors.error,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 10,
-                    ),
-                  ],
-                ),
-                child: Row(
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Row(
                   children: [
-                    Icon(
-                      _lastSuccess
-                          ? Icons.check_circle_rounded
-                          : Icons.error_outline_rounded,
-                      color: Colors.white,
-                      size: 28,
-                    ),
-                    const Gap(12),
                     Expanded(
-                      child: Text(
-                        _lastResult!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _switchMode(AttendanceEventType.checkIn),
+                        icon: const Icon(Icons.login_rounded),
+                        label: const Text('تسجيل دخول'),
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: isCheckInMode
+                              ? AppColors.primary.withValues(alpha: 0.08)
+                              : null,
+                        ),
+                      ),
+                    ),
+                    const Gap(10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _switchMode(AttendanceEventType.checkOut),
+                        icon: const Icon(Icons.logout_rounded),
+                        label: const Text('تسجيل خروج'),
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: !isCheckInMode
+                              ? AppColors.primary.withValues(alpha: 0.08)
+                              : null,
                         ),
                       ),
                     ),
                   ],
                 ),
-              ),
+                const Gap(18),
+                Icon(
+                  Icons.bluetooth_searching_rounded,
+                  size: 76,
+                  color: AppColors.primary,
+                ),
+                const Gap(10),
+                Text(
+                  _isScanning ? 'الاستقبال جارٍ' : 'الاستقبال متوقف',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Gap(6),
+                Text(
+                  _isBluetoothOn
+                      ? 'البلوتوث مفعل'
+                      : 'البلوتوث غير مفعل، يرجى تفعيله',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Gap(24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _CounterCard(
+                        icon: Icons.verified_rounded,
+                        color: AppColors.success,
+                        title: acceptedLabel,
+                        count: _acceptedCount,
+                      ),
+                    ),
+                    const Gap(12),
+                    Expanded(
+                      child: _CounterCard(
+                        icon: Icons.block_rounded,
+                        color: AppColors.error,
+                        title: rejectedLabel,
+                        count: _rejectedCount,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-          if (_processing)
-            Container(
-              color: Colors.black45,
-              child: const Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              ),
+class _CounterCard extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final int count;
+
+  const _CounterCard({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const Gap(8),
+          Text(
+            '$count',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
             ),
+          ),
+          const Gap(4),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ],
       ),
     );

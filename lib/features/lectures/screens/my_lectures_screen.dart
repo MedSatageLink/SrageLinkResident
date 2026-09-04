@@ -95,7 +95,7 @@ class MyLecturesScreen extends ConsumerWidget {
                     margin: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => context.push('/scan/${l['id']}'),
+                      onTap: null,
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -164,6 +164,30 @@ class MyLecturesScreen extends ConsumerWidget {
                             Text(
                               'عدد الحضور: $count',
                               style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            const Gap(10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => context.push(
+                                      '/scan/${l['id']}?mode=check_in',
+                                    ),
+                                    icon: const Icon(Icons.login_rounded),
+                                    label: const Text('تسجيل دخول'),
+                                  ),
+                                ),
+                                const Gap(8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => context.push(
+                                      '/scan/${l['id']}?mode=check_out',
+                                    ),
+                                    icon: const Icon(Icons.logout_rounded),
+                                    label: const Text('تسجيل خروج'),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
