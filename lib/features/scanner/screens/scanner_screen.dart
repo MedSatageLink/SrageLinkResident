@@ -16,6 +16,12 @@ class ScannerScreen extends ConsumerStatefulWidget {
 }
 
 class _State extends ConsumerState<ScannerScreen> {
+  static const bool _bleDebug = true;
+  static const String _checkInServiceUuid =
+      '0000a101-0000-1000-8000-00805f9b34fb';
+  static const String _checkOutServiceUuid =
+      '0000a102-0000-1000-8000-00805f9b34fb';
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   bool _isScanning = false;
@@ -25,6 +31,94 @@ class _State extends ConsumerState<ScannerScreen> {
   bool _lastSuccess = false;
   final Map<String, DateTime> _recentEvents = <String, DateTime>{};
   int _ignoredBleFrames = 0;
+
+  void _log(String message) {
+    if (!_bleDebug) return;
+    debugPrint('[BLE][Scanner] $message');
+  }
+
+  String _hex(List<int> bytes, {int maxBytes = 24}) {
+    final view = bytes.length > maxBytes ? bytes.sublist(0, maxBytes) : bytes;
+    final hex = view.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+    if (bytes.length > maxBytes) {
+      return '$hex ... (+${bytes.length - maxBytes} bytes)';
+    }
+    return hex;
+  }
+
+  void _logAdvertisement(ScanResult result) {
+    final ad = result.advertisementData;
+    final serviceUuids = ad.serviceUuids.map((u) => u.toString()).toList();
+    _log(
+      'frame from id=${result.device.remoteId.str}, '
+      'name="${result.device.platformName}", rssi=${result.rssi}, '
+      'serviceUuids=$serviceUuids',
+    );
+
+    if (ad.manufacturerData.isEmpty) {
+      _log('manufacturerData: empty');
+    } else {
+      for (final entry in ad.manufacturerData.entries) {
+        _log(
+          'manufacturerData[0x${entry.key.toRadixString(16)}] '
+          'len=${entry.value.length} hex=${_hex(entry.value)}',
+        );
+      }
+    }
+
+    if (ad.serviceData.isEmpty) {
+      _log('serviceData: empty');
+    } else {
+      for (final entry in ad.serviceData.entries) {
+        _log(
+          'serviceData[${entry.key}] '
+          'len=${entry.value.length} hex=${_hex(entry.value)}',
+        );
+      }
+    }
+  }
+
+  String? _normalizeUuidOrNull(String value) {
+    final clean = value.replaceAll('-', '').toLowerCase();
+    final isHex = RegExp(r'^[0-9a-f]+$').hasMatch(clean);
+    if (!isHex) return null;
+
+    if (clean.length == 4) {
+      return '0000$clean-0000-1000-8000-00805f9b34fb';
+    }
+    if (clean.length == 8) {
+      return '$clean-0000-1000-8000-00805f9b34fb';
+    }
+    if (clean.length != 32) return null;
+
+    return '${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}';
+  }
+
+  ({String studentId, AttendanceEventType eventType})? _parseServiceUuidsHeuristic(
+    List<String> serviceUuids,
+  ) {
+    final normalized = <String>[];
+    for (final raw in serviceUuids) {
+      final n = _normalizeUuidOrNull(raw);
+      if (n != null) normalized.add(n);
+    }
+    if (normalized.isEmpty) return null;
+
+    final hasCheckOut = normalized.contains(_checkOutServiceUuid);
+    final eventType = hasCheckOut
+        ? AttendanceEventType.checkOut
+        : AttendanceEventType.checkIn;
+
+    for (final uuid in normalized) {
+      if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
+        continue;
+      }
+      return (studentId: uuid, eventType: eventType);
+    }
+
+    // If only event UUID is present, we still cannot identify a student.
+    return null;
+  }
 
   @override
   void initState() {
@@ -40,7 +134,9 @@ class _State extends ConsumerState<ScannerScreen> {
   Future<void> _startScanning() async {
     if (_isScanning) return;
     try {
+      _log('start scan requested for lectureId=${widget.lectureId}');
       if (!await FlutterBluePlus.isSupported) {
+        _log('BLE not supported on this device');
         if (!mounted) return;
         setState(() {
           _lastResult = 'هذا الجهاز لا يدعم BLE';
@@ -51,9 +147,12 @@ class _State extends ConsumerState<ScannerScreen> {
       }
 
       final adapterState = await FlutterBluePlus.adapterState.first;
+      _log('adapterState before scan: $adapterState');
       if (adapterState != BluetoothAdapterState.on) {
         try {
+          _log('adapter is not ON, trying to turn on bluetooth');
           await FlutterBluePlus.turnOn();
+          _log('turnOn request sent');
         } catch (_) {}
       }
 
@@ -67,9 +166,11 @@ class _State extends ConsumerState<ScannerScreen> {
         timeout: const Duration(days: 1),
         androidUsesFineLocation: false,
       );
+      _log('scan started successfully');
       if (!mounted) return;
       setState(() => _isScanning = true);
     } catch (e) {
+      _log('scan start failed: $e');
       final text = e.toString();
       var msg = 'تعذر بدء استقبال BLE، تحقق من صلاحيات البلوتوث';
       if (text.contains('permission') || text.contains('Permission')) {
@@ -88,6 +189,7 @@ class _State extends ConsumerState<ScannerScreen> {
   }
 
   Future<void> _stopScanning() async {
+    _log('stop scan requested');
     await FlutterBluePlus.stopScan();
     await _scanSub?.cancel();
     _scanSub = null;
@@ -97,8 +199,11 @@ class _State extends ConsumerState<ScannerScreen> {
 
   Future<void> _onScanResults(List<ScanResult> results) async {
     if (_processing || results.isEmpty) return;
+    _log('onScanResults batch size=${results.length}, processing=$_processing');
 
     for (final result in results) {
+      _logAdvertisement(result);
+
       final manufacturerMap = result.advertisementData.manufacturerData;
       final serviceDataMap = result.advertisementData.serviceData;
       final rawServiceUuids = result.advertisementData.serviceUuids;
@@ -109,28 +214,41 @@ class _State extends ConsumerState<ScannerScreen> {
         if (text.isNotEmpty) serviceUuidStrings.add(text);
       }
 
+      _log('serviceUuids strings for parsing: $serviceUuidStrings');
+
       final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
         serviceUuidStrings,
       );
-      if (fromServiceUuids != null) {
+      final parsedService =
+          fromServiceUuids ?? _parseServiceUuidsHeuristic(serviceUuidStrings);
+      if (parsedService != null) {
+        _log(
+          'parsed from serviceUuids => studentId=${parsedService.studentId}, '
+          'eventType=${parsedService.eventType.value}',
+        );
         final dedupeKey =
-            '${fromServiceUuids.studentId}_${widget.lectureId}_${fromServiceUuids.eventType.value}';
+            '${parsedService.studentId}_${widget.lectureId}_${parsedService.eventType.value}';
         final now = DateTime.now();
         final recentAt = _recentEvents[dedupeKey];
         if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
+          _log('duplicate event ignored for key=$dedupeKey');
           continue;
         }
 
         _recentEvents[dedupeKey] = now;
+        _log('event accepted from serviceUuids, sending to processAttendance');
         await _processAttendance(
-          studentId: fromServiceUuids.studentId,
-          eventType: fromServiceUuids.eventType,
+          studentId: parsedService.studentId,
+          eventType: parsedService.eventType,
         );
         break;
       }
 
+      _log('serviceUuids parsing did not match attendance format');
+
       if (manufacturerMap.isEmpty && serviceDataMap.isEmpty) {
         _ignoredBleFrames++;
+        _log('ignored frame: no manufacturerData and no serviceData');
         continue;
       }
 
@@ -138,25 +256,51 @@ class _State extends ConsumerState<ScannerScreen> {
       final expected = manufacturerMap[BleAttendanceCodec.manufacturerId];
       if (expected != null && expected.isNotEmpty) {
         candidates.add(expected);
+        _log(
+          'candidate added from expected manufacturerId '
+          '0x${BleAttendanceCodec.manufacturerId.toRadixString(16)} '
+          'len=${expected.length} hex=${_hex(expected)}',
+        );
       }
       for (final entry in manufacturerMap.entries) {
         if (entry.value.isNotEmpty) {
           candidates.add(entry.value);
+          _log(
+            'candidate added from manufacturerData '
+            'id=0x${entry.key.toRadixString(16)} '
+            'len=${entry.value.length} hex=${_hex(entry.value)}',
+          );
         }
       }
       for (final entry in serviceDataMap.entries) {
         if (entry.value.isNotEmpty) {
           candidates.add(entry.value);
+          _log(
+            'candidate added from serviceData uuid=${entry.key} '
+            'len=${entry.value.length} hex=${_hex(entry.value)}',
+          );
         }
       }
 
+      _log('total raw-byte candidates count=${candidates.length}');
+
       ({String studentId, AttendanceEventType eventType})? parsed;
-      for (final bytes in candidates) {
+      for (var i = 0; i < candidates.length; i++) {
+        final bytes = candidates[i];
+        _log('trying candidate[$i] len=${bytes.length} hex=${_hex(bytes)}');
         parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
-        if (parsed != null) break;
+        if (parsed != null) {
+          _log(
+            'candidate[$i] parsed OK => studentId=${parsed.studentId}, '
+            'eventType=${parsed.eventType.value}',
+          );
+          break;
+        }
+        _log('candidate[$i] parse failed');
       }
       if (parsed == null) {
         _ignoredBleFrames++;
+        _log('all candidates failed parsing; ignoredFrames=$_ignoredBleFrames');
         if (mounted && _ignoredBleFrames % 20 == 0) {
           setState(() {
             _lastResult =
@@ -172,10 +316,12 @@ class _State extends ConsumerState<ScannerScreen> {
       final now = DateTime.now();
       final recentAt = _recentEvents[dedupeKey];
       if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
+        _log('duplicate event ignored for key=$dedupeKey');
         continue;
       }
 
       _recentEvents[dedupeKey] = now;
+      _log('event accepted from byte payload, sending to processAttendance');
       await _processAttendance(
         studentId: parsed.studentId,
         eventType: parsed.eventType,
@@ -190,6 +336,11 @@ class _State extends ConsumerState<ScannerScreen> {
   }) async {
     if (_processing) return;
 
+    _log(
+      'processAttendance started: lectureId=${widget.lectureId}, '
+      'studentId=$studentId, eventType=${eventType.value}',
+    );
+
     setState(() => _processing = true);
 
     try {
@@ -200,11 +351,17 @@ class _State extends ConsumerState<ScannerScreen> {
             eventType: eventType,
           );
 
+      _log(
+        'processAttendance result: success=${result.success}, '
+        'message="${result.message}"',
+      );
+
       setState(() {
         _lastResult = result.message;
         _lastSuccess = result.success;
       });
-    } catch (_) {
+    } catch (e) {
+      _log('processAttendance exception: $e');
       setState(() {
         _lastResult = 'فشل تسجيل الحضور، حاول مجدداً';
         _lastSuccess = false;

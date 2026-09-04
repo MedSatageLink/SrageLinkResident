@@ -51,8 +51,7 @@ class BleAttendanceCodec {
         ? AttendanceEventType.checkIn
         : normalized.contains(_checkOutServiceUuid)
         ? AttendanceEventType.checkOut
-        : null;
-    if (eventType == null) return null;
+      : AttendanceEventType.checkIn;
 
     for (final uuid in normalized) {
       if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
@@ -85,6 +84,12 @@ class BleAttendanceCodec {
 
   static String? _tryNormalizeUuid(String value) {
     final clean = value.replaceAll('-', '').toLowerCase();
+    if (clean.length == 4) {
+      return '0000$clean-0000-1000-8000-00805f9b34fb';
+    }
+    if (clean.length == 8) {
+      return '$clean-0000-1000-8000-00805f9b34fb';
+    }
     if (clean.length != 32) return null;
     final isHex = RegExp(r'^[0-9a-f]{32}$').hasMatch(clean);
     if (!isHex) return null;
