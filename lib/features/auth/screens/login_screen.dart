@@ -7,6 +7,7 @@ import 'package:gap/gap.dart';
 import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/services/device_service.dart';
 
 class ResidentLoginScreen extends ConsumerStatefulWidget {
   const ResidentLoginScreen({super.key});
@@ -16,7 +17,7 @@ class ResidentLoginScreen extends ConsumerStatefulWidget {
 
 class _State extends ConsumerState<ResidentLoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailCtrl = TextEditingController();
+  final _usernameCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
@@ -28,6 +29,13 @@ class _State extends ConsumerState<ResidentLoginScreen> {
   static const _fieldText = Color(0xFF0F172A);
   static const _fieldHint = Color(0xFF64748B);
   static const _buttonBg = Color(0xFF059669);
+
+  @override
+  void dispose() {
+    _usernameCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
 
   InputDecoration _fieldDecoration({
     required String label,
@@ -69,10 +77,42 @@ class _State extends ConsumerState<ResidentLoginScreen> {
       _error = null;
     });
     try {
+      final username = _usernameCtrl.text.trim().toLowerCase();
+      final resolve = await Supabase.instance.client.rpc(
+        'resolve_login_username',
+        params: {'p_username': username},
+      );
+      final resolveMap = Map<String, dynamic>.from(resolve as Map);
+      if (resolveMap['status'] != 'ok') {
+        throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
+      }
+
       await Supabase.instance.client.auth.signInWithPassword(
-        email: _emailCtrl.text.trim(),
+        email: resolveMap['auth_email'] as String,
         password: _passCtrl.text,
       );
+
+      final deviceId = await DeviceService().getDeviceId();
+      final lockRes = await Supabase.instance.client.rpc(
+        'finalize_device_login',
+        params: {'p_device_id': deviceId},
+      );
+      final lockMap = Map<String, dynamic>.from(lockRes as Map);
+      if (lockMap['status'] != 'ok') {
+        await Supabase.instance.client.auth.signOut();
+        final msg = lockMap['message'] as String?;
+        if (msg == 'reactivation_required') {
+          throw Exception('الحساب مقفول. يرجى طلب إعادة تفعيل من الإدارة');
+        }
+        if (msg == 'same_device_only') {
+          throw Exception('إعادة التفعيل مقيدة بنفس الجهاز السابق فقط');
+        }
+        if (msg == 'account_disabled') {
+          throw Exception('الحساب معطّل حالياً');
+        }
+        throw Exception('غير مسموح بتسجيل الدخول من هذا الجهاز');
+      }
+
       ref.invalidate(routerProvider);
     } catch (e) {
       setState(() => _error = AppErrorMessage.from(e));
@@ -152,16 +192,15 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                       child: Column(
                         children: [
                           TextFormField(
-                            controller: _emailCtrl,
-                            keyboardType: TextInputType.emailAddress,
+                            controller: _usernameCtrl,
                             textDirection: TextDirection.ltr,
                             style: const TextStyle(color: _fieldText),
                             decoration: _fieldDecoration(
-                              label: 'البريد الإلكتروني',
-                              icon: Icons.email_outlined,
+                              label: 'اسم المستخدم',
+                              icon: Icons.alternate_email_rounded,
                             ),
                             validator: (v) =>
-                                v!.isEmpty ? 'أدخل البريد الإلكتروني' : null,
+                                v!.isEmpty ? 'أدخل اسم المستخدم' : null,
                           ),
                           const Gap(16),
                           TextFormField(
