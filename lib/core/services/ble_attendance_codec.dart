@@ -6,17 +6,17 @@ class BleAttendanceCodec {
       '0000a100-0000-1000-8000-00805f9b34fb';
 
   static String? parse(Uint8List bytes) {
-    if (bytes.length < 17) return null;
+    if (bytes.length != 17 && bytes.length != 18) return null;
     if (bytes[0] != 1) return null;
 
     // Legacy fallback (older app builds): [1, event, uuid16]
-    if (bytes.length >= 18 && (bytes[1] == 1 || bytes[1] == 2)) {
+    if (bytes.length == 18 && (bytes[1] == 1 || bytes[1] == 2)) {
       final legacy = bytes.sublist(2, 18);
       return _bytesToUuid(legacy);
     }
 
     // New format: [1, uuid16]
-    if (bytes.length >= 17) {
+    if (bytes.length == 17) {
       final direct = bytes.sublist(1, 17);
       return _bytesToUuid(direct);
     }
