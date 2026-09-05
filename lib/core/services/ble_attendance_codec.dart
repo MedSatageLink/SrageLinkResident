@@ -2,10 +2,8 @@ import 'dart:typed_data';
 
 class BleAttendanceCodec {
   static const int manufacturerId = 0x1234;
-  static const String _checkInServiceUuid =
-      '0000a101-0000-1000-8000-00805f9b34fb';
-  static const String _checkOutServiceUuid =
-      '0000a102-0000-1000-8000-00805f9b34fb';
+  static const String markerServiceUuidFull =
+      '0000a100-0000-1000-8000-00805f9b34fb';
 
   static String? parse(Uint8List bytes) {
     if (bytes.length < 17) return null;
@@ -33,8 +31,11 @@ class BleAttendanceCodec {
     }
     if (normalized.isEmpty) return null;
 
+    // Ignore any advertisement that does not carry our marker UUID.
+    if (!normalized.contains(markerServiceUuidFull)) return null;
+
     for (final uuid in normalized) {
-      if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
+      if (uuid == markerServiceUuidFull) {
         continue;
       }
       return uuid;

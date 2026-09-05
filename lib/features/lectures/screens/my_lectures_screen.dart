@@ -12,12 +12,21 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
   final uid = Supabase.instance.client.auth.currentUser!.id;
+  final me = await Supabase.instance.client
+      .from('profiles')
+      .select('subject_id')
+      .eq('id', uid)
+      .maybeSingle();
+  final subjectId = me?['subject_id'] as String?;
+  if (subjectId == null) return [];
+
   final lectures = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, start_at, end_at, location, attendance_window_start, attendance_window_end, practical_sessions(title)',
+        'id, resident_id, start_at, end_at, location, attendance_window_start, attendance_window_end, practical_sessions!inner(title, subject_id)',
       )
-      .eq('resident_id', uid)
+      .eq('practical_sessions.subject_id', subjectId)
+      .or('resident_id.is.null,resident_id.eq.$uid')
       .order('start_at', ascending: false);
 
   final lectureIds = (lectures as List).map((l) => l['id'] as String).toList();
@@ -77,6 +86,12 @@ class MyLecturesScreen extends ConsumerWidget {
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
                   final count = l['attendance_count'] as int;
+                  final isClaimedByMe =
+                      l['resident_id'] ==
+                      Supabase.instance.client.auth.currentUser!.id;
+                  final ownerText = isClaimedByMe
+                      ? 'مستلمة بواسطتك'
+                      : 'غير مستلمة (متاحة)';
 
                   final now = DateTime.now();
                   final windowStart = DateTime.tryParse(
@@ -165,13 +180,20 @@ class MyLecturesScreen extends ConsumerWidget {
                               'عدد الحضور: $count',
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
+                            const Gap(4),
+                            Text(
+                              ownerText,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                             const Gap(10),
                             Row(
                               children: [
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: () =>
-                                        context.push('/scan/${l['id']}'),
+                                    onPressed: () async {
+                                      await context.push('/scan/${l['id']}');
+                                      ref.invalidate(myLecturesDetailProvider);
+                                    },
                                     icon: const Icon(Icons.login_rounded),
                                     label: const Text('تسجيل دخول'),
                                   ),
@@ -179,8 +201,10 @@ class MyLecturesScreen extends ConsumerWidget {
                                 const Gap(8),
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: () =>
-                                        context.push('/scan/${l['id']}'),
+                                    onPressed: () async {
+                                      await context.push('/scan/${l['id']}');
+                                      ref.invalidate(myLecturesDetailProvider);
+                                    },
                                     icon: const Icon(Icons.logout_rounded),
                                     label: const Text('تسجيل خروج'),
                                   ),

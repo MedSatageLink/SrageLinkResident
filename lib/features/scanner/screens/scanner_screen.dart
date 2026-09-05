@@ -17,10 +17,6 @@ class ScannerScreen extends ConsumerStatefulWidget {
 
 class _State extends ConsumerState<ScannerScreen> {
   static const bool _bleDebug = true;
-  static const String _checkInServiceUuid =
-      '0000a101-0000-1000-8000-00805f9b34fb';
-  static const String _checkOutServiceUuid =
-      '0000a102-0000-1000-8000-00805f9b34fb';
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
@@ -77,41 +73,6 @@ class _State extends ConsumerState<ScannerScreen> {
         );
       }
     }
-  }
-
-  String? _normalizeUuidOrNull(String value) {
-    final clean = value.replaceAll('-', '').toLowerCase();
-    final isHex = RegExp(r'^[0-9a-f]+$').hasMatch(clean);
-    if (!isHex) return null;
-
-    if (clean.length == 4) {
-      return '0000$clean-0000-1000-8000-00805f9b34fb';
-    }
-    if (clean.length == 8) {
-      return '$clean-0000-1000-8000-00805f9b34fb';
-    }
-    if (clean.length != 32) return null;
-
-    return '${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}';
-  }
-
-  String? _parseServiceUuidsHeuristic(List<String> serviceUuids) {
-    final normalized = <String>[];
-    for (final raw in serviceUuids) {
-      final n = _normalizeUuidOrNull(raw);
-      if (n != null) normalized.add(n);
-    }
-    if (normalized.isEmpty) return null;
-
-    for (final uuid in normalized) {
-      if (uuid == _checkInServiceUuid || uuid == _checkOutServiceUuid) {
-        continue;
-      }
-      return uuid;
-    }
-
-    // If only event UUID is present, we still cannot identify a student.
-    return null;
   }
 
   @override
@@ -221,9 +182,7 @@ class _State extends ConsumerState<ScannerScreen> {
       final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
         serviceUuidStrings,
       );
-      final String? parsedService = (fromServiceUuids == null
-          ? _parseServiceUuidsHeuristic(serviceUuidStrings)
-          : fromServiceUuids);
+      final String? parsedService = fromServiceUuids;
       if (parsedService != null) {
         _log(
           'parsed from serviceUuids => studentId=$parsedService, eventType=${mode.value}',
@@ -348,23 +307,71 @@ class _State extends ConsumerState<ScannerScreen> {
         'queued_for_approval',
         'queued_local',
       };
+      final rejectedStatuses = <String>{
+        'already_checked_in',
+        'already_checked_out',
+        'duplicate',
+      };
       if (mounted) {
         setState(() {
           if (acceptedStatuses.contains(result.status)) {
             _acceptedCount++;
-          } else {
+          } else if (rejectedStatuses.contains(result.status)) {
             _rejectedCount++;
           }
         });
+
+        if (result.status == 'lecture_claimed_by_other_resident') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم استلام هذه المحاضرة من مقيم آخر')),
+          );
+          await _stopScanning();
+          if (mounted && context.mounted) Navigator.of(context).maybePop();
+        }
       }
     } catch (e) {
       _log('processAttendance exception: $e');
-      if (mounted) {
-        setState(() => _rejectedCount++);
-      }
     } finally {
       _inFlightKeys.remove(opKey);
     }
+  }
+
+  Future<void> _delegateLecture() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('توكيل مقيم آخر'),
+        content: const Text(
+          'سيتم إلغاء استلامك الحالي للمحاضرة لتصبح متاحة لمقيم آخر من نفس المادة. هل تريد المتابعة؟',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('توكيل'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final result = await AttendanceSyncService.instance.releaseLectureResident(
+      lectureId: widget.lectureId,
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.message)));
+
+    if (!result.success) return;
+
+    await _stopScanning();
+    if (!mounted || !context.mounted) return;
+    Navigator.of(context).maybePop();
   }
 
   @override
@@ -400,6 +407,11 @@ class _State extends ConsumerState<ScannerScreen> {
               : 'اختر وضع الاستقبال',
         ),
         actions: [
+          TextButton.icon(
+            onPressed: _delegateLecture,
+            icon: const Icon(Icons.swap_horiz_rounded),
+            label: const Text('توكيل مقيم آخر'),
+          ),
           IconButton(
             icon: Icon(
               _isScanning

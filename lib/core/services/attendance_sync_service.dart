@@ -129,6 +129,22 @@ class AttendanceSyncService {
           status: 'duplicate',
         );
       }
+      if ((result['message'] as String?) ==
+          'lecture_claimed_by_other_resident') {
+        return const AttendanceSyncResult(
+          false,
+          'تم استلام هذه المحاضرة من مقيم آخر',
+          status: 'lecture_claimed_by_other_resident',
+        );
+      }
+      if ((result['message'] as String?) ==
+          'resident_not_allowed_for_subject') {
+        return const AttendanceSyncResult(
+          false,
+          'غير مسموح لك باستقبال هذه المحاضرة (اختلاف المادة)',
+          status: 'resident_not_allowed_for_subject',
+        );
+      }
       final serverMessage = result['message'] as String?;
       if (serverMessage == 'missing_check_in') {
         return const AttendanceSyncResult(
@@ -156,6 +172,54 @@ class AttendanceSyncService {
         true,
         'تم حفظ ${eventType.arabicLabel} محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
         status: 'queued_local',
+      );
+    }
+  }
+
+  Future<AttendanceSyncResult> releaseLectureResident({
+    required String lectureId,
+  }) async {
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'release_practical_lecture_resident',
+        params: {'p_lecture_id': lectureId},
+      );
+      final map = Map<String, dynamic>.from(res as Map);
+      final status = map['status'] as String? ?? '';
+      final message = map['message'] as String?;
+
+      if (status == 'released') {
+        return const AttendanceSyncResult(
+          true,
+          'تمت إعادة فتح المحاضرة لمقيم آخر بنجاح',
+          status: 'released',
+        );
+      }
+      if (status == 'already_unclaimed') {
+        return const AttendanceSyncResult(
+          true,
+          'المحاضرة غير مستلمة حالياً',
+          status: 'already_unclaimed',
+        );
+      }
+      if (message == 'not_lecture_owner') {
+        return const AttendanceSyncResult(
+          false,
+          'لا يمكنك التوكيل لأنك لست المستلم الحالي للمحاضرة',
+          status: 'not_lecture_owner',
+        );
+      }
+
+      return AttendanceSyncResult(
+        false,
+        message ?? 'تعذر تنفيذ التوكيل',
+        status: status.isEmpty ? 'failed' : status,
+      );
+    } catch (_) {
+      return const AttendanceSyncResult(
+        false,
+        'تعذر الاتصال بالخادم لتنفيذ التوكيل',
+        status: 'network_error',
       );
     }
   }
