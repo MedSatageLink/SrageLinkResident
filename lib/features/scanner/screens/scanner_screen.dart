@@ -16,8 +16,7 @@ class ScannerScreen extends ConsumerStatefulWidget {
 }
 
 class _State extends ConsumerState<ScannerScreen> {
-  static const String _markerUuid =
-      BleAttendanceCodec.markerServiceUuidFull;
+  static const String _markerUuid = BleAttendanceCodec.markerServiceUuidFull;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
@@ -139,14 +138,14 @@ class _State extends ConsumerState<ScannerScreen> {
         if (text.isNotEmpty) serviceUuidStrings.add(text);
       }
 
-        final hasMarkerInServiceUuids = _hasMarkerInServiceUuids(rawServiceUuids);
-        final hasMarkerInServiceData = _hasMarkerInServiceData(serviceDataMap);
-        final expectedManufacturerPayload =
+      final hasMarkerInServiceUuids = _hasMarkerInServiceUuids(rawServiceUuids);
+      final hasMarkerInServiceData = _hasMarkerInServiceData(serviceDataMap);
+      final expectedManufacturerPayload =
           manufacturerMap[BleAttendanceCodec.manufacturerId];
-        final hasExpectedManufacturerPayload =
+      final hasExpectedManufacturerPayload =
           expectedManufacturerPayload != null &&
           expectedManufacturerPayload.isNotEmpty;
-        final hasTrustedSignature =
+      final hasTrustedSignature =
           hasMarkerInServiceUuids ||
           hasMarkerInServiceData ||
           hasExpectedManufacturerPayload;
@@ -196,7 +195,7 @@ class _State extends ConsumerState<ScannerScreen> {
       }
 
       String? parsed;
-        for (final bytes in candidates) {
+      for (final bytes in candidates) {
         parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
         if (parsed != null) {
           break;
@@ -378,7 +377,7 @@ class _State extends ConsumerState<ScannerScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () =>
-                          _onModePressed(AttendanceEventType.checkIn),
+                            _onModePressed(AttendanceEventType.checkIn),
                         icon: const Icon(Icons.login_rounded),
                         label: const Text('تسجيل دخول'),
                         style: OutlinedButton.styleFrom(
@@ -397,7 +396,7 @@ class _State extends ConsumerState<ScannerScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () =>
-                          _onModePressed(AttendanceEventType.checkOut),
+                            _onModePressed(AttendanceEventType.checkOut),
                         icon: const Icon(Icons.logout_rounded),
                         label: const Text('تسجيل خروج'),
                         style: OutlinedButton.styleFrom(
