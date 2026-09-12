@@ -8,6 +8,13 @@ import 'package:intl/intl.dart';
 import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 
+DateTime _currentWeekStartSaturdayLocal() {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final daysSinceSaturday = (today.weekday - DateTime.saturday + 7) % 7;
+  return today.subtract(Duration(days: daysSinceSaturday));
+}
+
 final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
@@ -20,13 +27,20 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   final subjectId = me?['subject_id'] as String?;
   if (subjectId == null) return [];
 
+  final weekStartLocal = _currentWeekStartSaturdayLocal();
+  final weekEndLocal = weekStartLocal.add(const Duration(days: 7));
+  final weekStartUtcIso = weekStartLocal.toUtc().toIso8601String();
+  final weekEndUtcIso = weekEndLocal.toUtc().toIso8601String();
+
   final lectures = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, resident_id, start_at, end_at, location, attendance_window_start, attendance_window_end, practical_sessions!inner(title, subject_id)',
+        'id, resident_id, start_at, end_at, attendance_window_start, attendance_window_end, practical_sessions!inner(title, subject_id, subjects(location))',
       )
       .eq('practical_sessions.subject_id', subjectId)
       .or('resident_id.is.null,resident_id.eq.$uid')
+      .gte('start_at', weekStartUtcIso)
+      .lt('start_at', weekEndUtcIso)
       .order('start_at', ascending: false);
 
   final lectureIds = (lectures as List).map((l) => l['id'] as String).toList();
@@ -66,7 +80,7 @@ class MyLecturesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final lecturesAsync = ref.watch(myLecturesDetailProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('محاضراتي')),
+      appBar: AppBar(title: const Text('الجلسات السريرية')),
       body: lecturesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text(AppErrorMessage.from(e))),
@@ -85,6 +99,11 @@ class MyLecturesScreen extends ConsumerWidget {
                   ).colorScheme.onSurface.withValues(alpha: 0.6);
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
+                  final subjectLocation =
+                      ((session?['subjects']
+                              as Map<String, dynamic>?)?['location']
+                          as String?) ??
+                      '';
                   final count = l['attendance_count'] as int;
                   final isClaimedByMe =
                       l['resident_id'] ==
@@ -170,7 +189,7 @@ class MyLecturesScreen extends ConsumerWidget {
                                 ),
                                 const Gap(4),
                                 Text(
-                                  l['location'] as String? ?? '',
+                                  subjectLocation,
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                               ],

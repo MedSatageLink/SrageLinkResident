@@ -6,7 +6,6 @@ import '../../features/auth/screens/login_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/scanner/screens/scanner_screen.dart';
 import '../../features/lectures/screens/my_lectures_screen.dart';
-import '../../features/profile/screens/profile_screen.dart';
 import '../../features/videos/screens/create_practical_video_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -30,10 +29,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-lectures',
         builder: (_, _) => const MyLecturesScreen(),
-      ),
-      GoRoute(
-        path: '/profile',
-        builder: (_, _) => const ResidentProfileScreen(),
       ),
       GoRoute(
         path: '/practical-videos/create',

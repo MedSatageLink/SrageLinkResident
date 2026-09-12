@@ -132,12 +132,6 @@ class _State extends ConsumerState<ScannerScreen> {
       final serviceDataMap = result.advertisementData.serviceData;
       final rawServiceUuids = result.advertisementData.serviceUuids;
 
-      final serviceUuidStrings = <String>[];
-      for (final uuid in rawServiceUuids) {
-        final text = uuid.toString();
-        if (text.isNotEmpty) serviceUuidStrings.add(text);
-      }
-
       final hasMarkerInServiceUuids = _hasMarkerInServiceUuids(rawServiceUuids);
       final hasMarkerInServiceData = _hasMarkerInServiceData(serviceDataMap);
       final expectedManufacturerPayload =
@@ -149,30 +143,6 @@ class _State extends ConsumerState<ScannerScreen> {
           hasMarkerInServiceUuids ||
           hasMarkerInServiceData ||
           hasExpectedManufacturerPayload;
-
-      final fromServiceUuids = BleAttendanceCodec.parseServiceUuids(
-        serviceUuidStrings,
-      );
-      final String? parsedService = fromServiceUuids;
-      if (parsedService != null) {
-        final dedupeKey = '${parsedService}_${widget.lectureId}_${mode.value}';
-        if (_sessionProcessedKeys.contains(dedupeKey)) {
-          continue;
-        }
-        final now = DateTime.now();
-        final recentAt = _recentEvents[dedupeKey];
-        if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
-          continue;
-        }
-
-        _recentEvents[dedupeKey] = now;
-        await _processAttendance(studentId: parsedService, eventType: mode);
-        break;
-      }
-
-      if (manufacturerMap.isEmpty && serviceDataMap.isEmpty) {
-        continue;
-      }
 
       if (!hasTrustedSignature) {
         continue;
@@ -194,22 +164,42 @@ class _State extends ConsumerState<ScannerScreen> {
         }
       }
 
-      String? parsed;
+      String? parsedLectureId;
       for (final bytes in candidates) {
-        parsed = BleAttendanceCodec.parse(Uint8List.fromList(bytes));
-        if (parsed != null) {
+        final lecture = BleAttendanceCodec.parseLectureId(
+          Uint8List.fromList(bytes),
+        );
+        if (lecture != null) {
+          parsedLectureId = lecture;
           break;
         }
       }
-      if (parsed == null) {
+
+      BleBoundAttendancePacket? bound;
+      for (final bytes in candidates) {
+        bound = BleAttendanceCodec.parseBoundPacket(Uint8List.fromList(bytes));
+        if (bound != null) {
+          break;
+        }
+      }
+
+      if (bound == null) {
         continue;
       }
 
-      if (!hasTrustedSignature) {
+      final expectedLectureToken = BleAttendanceCodec.lectureToken16(
+        widget.lectureId,
+      );
+      if (bound.lectureToken16 != expectedLectureToken) {
         continue;
       }
 
-      final dedupeKey = '${parsed}_${widget.lectureId}_${mode.value}';
+      if (parsedLectureId != null &&
+          !BleAttendanceCodec.isSameUuid(parsedLectureId, widget.lectureId)) {
+        continue;
+      }
+
+      final dedupeKey = '${bound.studentId}_${widget.lectureId}_${mode.value}';
       if (_sessionProcessedKeys.contains(dedupeKey)) {
         continue;
       }
@@ -220,7 +210,7 @@ class _State extends ConsumerState<ScannerScreen> {
       }
 
       _recentEvents[dedupeKey] = now;
-      await _processAttendance(studentId: parsed, eventType: mode);
+      await _processAttendance(studentId: bound.studentId, eventType: mode);
       break;
     }
   }
@@ -272,7 +262,7 @@ class _State extends ConsumerState<ScannerScreen> {
           if (mounted && context.mounted) Navigator.of(context).maybePop();
         }
       }
-    } catch (e) {
+    } catch (_) {
     } finally {
       _inFlightKeys.remove(opKey);
     }
