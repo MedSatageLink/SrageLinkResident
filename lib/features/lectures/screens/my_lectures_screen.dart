@@ -19,13 +19,14 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   ref,
 ) async {
   final uid = Supabase.instance.client.auth.currentUser!.id;
-  final me = await Supabase.instance.client
-      .from('profiles')
+  final assignments = await Supabase.instance.client
+      .from('user_subject_assignments')
       .select('subject_id')
-      .eq('id', uid)
-      .maybeSingle();
-  final subjectId = me?['subject_id'] as String?;
-  if (subjectId == null) return [];
+      .eq('user_id', uid);
+  final subjectIds = List<Map<String, dynamic>>.from(
+    assignments as List,
+  ).map((e) => e['subject_id'] as String?).whereType<String>().toSet().toList();
+  if (subjectIds.isEmpty) return [];
 
   final weekStartLocal = _currentWeekStartSaturdayLocal();
   final weekEndLocal = weekStartLocal.add(const Duration(days: 7));
@@ -35,9 +36,9 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
   final lectures = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, resident_id, start_at, end_at, attendance_window_start, attendance_window_end, practical_sessions!inner(title, subject_id, subjects(location))',
+        'id, resident_id, start_at, end_at, attendance_window_start, attendance_window_end, target_category_id, categories(name), practical_sessions!inner(title, subject_id, subjects(location))',
       )
-      .eq('practical_sessions.subject_id', subjectId)
+      .inFilter('practical_sessions.subject_id', subjectIds)
       .or('resident_id.is.null,resident_id.eq.$uid')
       .gte('start_at', weekStartUtcIso)
       .lt('start_at', weekEndUtcIso)
@@ -65,9 +66,16 @@ final myLecturesDetailProvider = FutureProvider<List<Map<String, dynamic>>>((
 class MyLecturesScreen extends ConsumerWidget {
   const MyLecturesScreen({super.key});
 
+  DateTime _toSyriaTime(DateTime value) {
+    const syriaOffset = Duration(hours: 3);
+    return (value.isUtc ? value : value.toUtc()).add(syriaOffset);
+  }
+
   String _formatLectureLine(Map<String, dynamic> lecture) {
-    final start = DateTime.tryParse(lecture['start_at'] as String? ?? '');
-    final end = DateTime.tryParse(lecture['end_at'] as String? ?? '');
+    final startRaw = DateTime.tryParse(lecture['start_at'] as String? ?? '');
+    final endRaw = DateTime.tryParse(lecture['end_at'] as String? ?? '');
+    final start = startRaw == null ? null : _toSyriaTime(startRaw);
+    final end = endRaw == null ? null : _toSyriaTime(endRaw);
     if (start == null) return '—';
     final dateStr = DateFormat('yyyy-MM-dd').format(start);
     final timeStr = DateFormat('HH:mm').format(start);
@@ -99,6 +107,10 @@ class MyLecturesScreen extends ConsumerWidget {
                   ).colorScheme.onSurface.withValues(alpha: 0.6);
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
+                  final categoryName =
+                      (l['categories'] as Map<String, dynamic>?)?['name']
+                          as String? ??
+                      '—';
                   final subjectLocation =
                       ((session?['subjects']
                               as Map<String, dynamic>?)?['location']
@@ -197,6 +209,11 @@ class MyLecturesScreen extends ConsumerWidget {
                             const Gap(10),
                             Text(
                               'عدد الحضور: $count',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            const Gap(4),
+                            Text(
+                              categoryName,
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
                             const Gap(4),
