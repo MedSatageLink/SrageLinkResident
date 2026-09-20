@@ -43,7 +43,7 @@ class AppErrorMessage {
     if (msg.contains('invalid login credentials') ||
         msg.contains('email not found') ||
         msg.contains('invalid email or password')) {
-      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+      return 'اسم المستخدم أو كلمة المرور غير صحيحة';
     }
     if (msg.contains('email not confirmed')) {
       return 'يرجى تأكيد البريد الإلكتروني أولاً';

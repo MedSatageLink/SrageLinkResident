@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -23,11 +25,11 @@ class _State extends ConsumerState<ResidentLoginScreen> {
   bool _obscure = true;
   String? _error;
 
-  static const _cardBg = Color(0xFFF8FAFC);
-  static const _fieldBg = Color(0xFFF1F5F9);
-  static const _fieldBorder = Color(0xFFCBD5E1);
-  static const _fieldText = Color(0xFF0F172A);
-  static const _fieldHint = Color(0xFF64748B);
+  static const _cardBg = Color(0xB3121A2B);
+  static const _fieldBg = Color(0xFF0B1224);
+  static const _fieldBorder = Color(0xFF1F2A44);
+  static const _fieldText = Color(0xFFF8FAFC);
+  static const _fieldHint = Color(0xFFB6C2D9);
   static const _buttonBg = Color(0xFF059669);
 
   @override
@@ -44,7 +46,7 @@ class _State extends ConsumerState<ResidentLoginScreen> {
   }) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: _fieldHint),
+      prefixIcon: Icon(icon, color: _fieldText),
       suffixIcon: suffix,
       filled: true,
       fillColor: _fieldBg,
@@ -173,93 +175,104 @@ class _State extends ConsumerState<ResidentLoginScreen> {
                       ),
                     ).animate(delay: 300.ms).fadeIn(),
                     const Gap(36),
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: _cardBg,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.65),
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x22000000),
-                            blurRadius: 20,
-                            offset: Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          TextFormField(
-                            controller: _usernameCtrl,
-                            textDirection: TextDirection.ltr,
-                            style: const TextStyle(color: _fieldText),
-                            decoration: _fieldDecoration(
-                              label: 'اسم المستخدم',
-                              icon: Icons.alternate_email_rounded,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                        child: Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: _cardBg,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.18),
                             ),
-                            validator: (v) =>
-                                v!.isEmpty ? 'أدخل اسم المستخدم' : null,
-                          ),
-                          const Gap(16),
-                          TextFormField(
-                            controller: _passCtrl,
-                            obscureText: _obscure,
-                            textDirection: TextDirection.ltr,
-                            style: const TextStyle(color: _fieldText),
-                            decoration: _fieldDecoration(
-                              label: 'كلمة المرور',
-                              icon: Icons.lock_outline_rounded,
-                              suffix: IconButton(
-                                icon: Icon(
-                                  _obscure
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.visibility_outlined,
-                                  color: _fieldHint,
-                                ),
-                                onPressed: () =>
-                                    setState(() => _obscure = !_obscure),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x660B1224),
+                                blurRadius: 28,
+                                offset: Offset(0, 14),
                               ),
-                            ),
-                            validator: (v) =>
-                                v!.isEmpty ? 'أدخل كلمة المرور' : null,
+                            ],
                           ),
-                          if (_error != null) ...[
-                            const Gap(12),
-                            Text(
-                              _error!,
-                              style: const TextStyle(color: AppColors.error),
-                            ),
-                          ],
-                          const Gap(20),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _loading ? null : _login,
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
+                          child: Column(
+                            children: [
+                              TextFormField(
+                                controller: _usernameCtrl,
+                                textDirection: TextDirection.ltr,
+                                style: const TextStyle(color: _fieldText),
+                                decoration: _fieldDecoration(
+                                  label: 'اسم المستخدم',
+                                  icon: Icons.alternate_email_rounded,
                                 ),
-                                backgroundColor: _buttonBg,
-                                foregroundColor: Colors.white,
+                                validator: (v) =>
+                                    v!.isEmpty ? 'أدخل اسم المستخدم' : null,
                               ),
-                              child: _loading
-                                  ? const SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text(
-                                      'تسجيل الدخول',
-                                      style: TextStyle(fontSize: 16),
+                              const Gap(16),
+                              TextFormField(
+                                controller: _passCtrl,
+                                obscureText: _obscure,
+                                textDirection: TextDirection.ltr,
+                                style: const TextStyle(color: _fieldText),
+                                decoration: _fieldDecoration(
+                                  label: 'كلمة المرور',
+                                  icon: Icons.lock_outline_rounded,
+                                  suffix: IconButton(
+                                    icon: Icon(
+                                      _obscure
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined,
+                                      color: _fieldText,
                                     ),
-                            ),
+                                    onPressed: () =>
+                                        setState(() => _obscure = !_obscure),
+                                  ),
+                                ),
+                                validator: (v) =>
+                                    v!.isEmpty ? 'أدخل كلمة المرور' : null,
+                              ),
+                              if (_error != null) ...[
+                                const Gap(12),
+                                Text(
+                                  _error!,
+                                  style: const TextStyle(
+                                    color: AppColors.error,
+                                  ),
+                                ),
+                              ],
+                              const Gap(20),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _loading ? null : _login,
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
+                                    backgroundColor: _buttonBg,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  child: _loading
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'تسجيل الدخول',
+                                          style: TextStyle(fontSize: 16),
+                                        ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.1),
                   ],
