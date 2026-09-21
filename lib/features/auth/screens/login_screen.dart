@@ -81,11 +81,17 @@ class _State extends ConsumerState<ResidentLoginScreen> {
     try {
       final username = _usernameCtrl.text.trim().toLowerCase();
       final resolve = await Supabase.instance.client.rpc(
-        'resolve_login_username',
-        params: {'p_username': username},
+        'resolve_login_username_for_role',
+        params: {
+          'p_username': username,
+          'p_expected_roles': ['resident'],
+        },
       );
       final resolveMap = Map<String, dynamic>.from(resolve as Map);
       if (resolveMap['status'] != 'ok') {
+        if (resolveMap['message'] == 'role_mismatch') {
+          throw Exception('هذا التطبيق مخصص لحسابات المقيمين فقط');
+        }
         throw Exception('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
 
@@ -94,15 +100,32 @@ class _State extends ConsumerState<ResidentLoginScreen> {
         password: _passCtrl.text,
       );
 
+      final me = await Supabase.instance.client
+          .from('profiles')
+          .select('role')
+          .eq('id', Supabase.instance.client.auth.currentUser!.id)
+          .single();
+      final role = me['role'] as String?;
+      if (role != 'resident') {
+        await Supabase.instance.client.auth.signOut();
+        throw Exception('هذا التطبيق مخصص لحسابات المقيمين فقط');
+      }
+
       final deviceId = await DeviceService().getDeviceId();
       final lockRes = await Supabase.instance.client.rpc(
-        'finalize_device_login',
-        params: {'p_device_id': deviceId},
+        'finalize_device_login_for_role',
+        params: {
+          'p_device_id': deviceId,
+          'p_expected_roles': ['resident'],
+        },
       );
       final lockMap = Map<String, dynamic>.from(lockRes as Map);
       if (lockMap['status'] != 'ok') {
         await Supabase.instance.client.auth.signOut();
         final msg = lockMap['message'] as String?;
+        if (msg == 'role_mismatch') {
+          throw Exception('هذا التطبيق مخصص لحسابات المقيمين فقط');
+        }
         if (msg == 'reactivation_required') {
           throw Exception('الحساب مقفول. يرجى طلب إعادة تفعيل من الإدارة');
         }
@@ -117,7 +140,11 @@ class _State extends ConsumerState<ResidentLoginScreen> {
 
       ref.invalidate(routerProvider);
     } catch (e) {
-      setState(() => _error = AppErrorMessage.from(e));
+      final raw = e.toString();
+      final explicit = raw.startsWith('Exception: ')
+          ? raw.substring('Exception: '.length)
+          : null;
+      setState(() => _error = explicit ?? AppErrorMessage.from(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -1,4 +1,5 @@
 import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,8 @@ import 'package:intl/intl.dart';
 import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
+import '../../../core/router/app_router.dart';
+import '../../../core/services/device_service.dart';
 
 DateTime _currentWeekStartSaturdayLocal() {
   final now = DateTime.now();
@@ -75,8 +78,81 @@ final myLecturesBySubjectProvider =
       return List<Map<String, dynamic>>.from(res as List);
     });
 
-class ResidentHomeScreen extends ConsumerWidget {
+class ResidentHomeScreen extends ConsumerStatefulWidget {
   const ResidentHomeScreen({super.key});
+
+  @override
+  ConsumerState<ResidentHomeScreen> createState() => _ResidentHomeScreenState();
+}
+
+class _ResidentHomeScreenState extends ConsumerState<ResidentHomeScreen>
+    with WidgetsBindingObserver {
+  Timer? _deviceLockTimer;
+  bool _checkingDeviceLock = false;
+  bool _forcedLogout = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_enforceDeviceLock());
+    _deviceLockTimer = Timer.periodic(
+      const Duration(seconds: 45),
+      (_) => unawaited(_enforceDeviceLock()),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_enforceDeviceLock());
+    }
+  }
+
+  Future<void> _enforceDeviceLock() async {
+    if (_checkingDeviceLock || _forcedLogout) return;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    _checkingDeviceLock = true;
+    try {
+      final myDeviceId = await DeviceService().getDeviceId();
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('role, login_enabled, login_device_id')
+          .eq('id', user.id)
+          .single();
+      final profile = Map<String, dynamic>.from(row);
+      final role = profile['role'] as String?;
+      final enabled = (profile['login_enabled'] as bool?) ?? true;
+      final lockedDeviceId = profile['login_device_id'] as String?;
+
+      final shouldLogout =
+          role != 'resident' ||
+          !enabled ||
+          lockedDeviceId == null ||
+          lockedDeviceId != myDeviceId;
+
+      if (shouldLogout) {
+        _forcedLogout = true;
+        await Supabase.instance.client.auth.signOut();
+        if (mounted) {
+          ref.invalidate(routerProvider);
+        }
+      }
+    } catch (_) {
+      // Ignore transient connectivity failures.
+    } finally {
+      _checkingDeviceLock = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _deviceLockTimer?.cancel();
+    super.dispose();
+  }
 
   DateTime _toSyriaTime(DateTime value) {
     const syriaOffset = Duration(hours: 3);
@@ -97,7 +173,7 @@ class ResidentHomeScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final subjectsAsync = ref.watch(residentSubjectsProvider);
     final themeMode = ref.watch(themeModeProvider);
     final isDark = themeMode == ThemeMode.dark;
