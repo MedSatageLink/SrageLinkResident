@@ -1,8 +1,10 @@
 import 'dart:ui' as ui;
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
@@ -21,9 +23,28 @@ DateTime _currentWeekStartSaturdayLocal() {
   return today.subtract(Duration(days: daysSinceSaturday));
 }
 
-final residentSubjectsProvider = FutureProvider<List<Map<String, dynamic>>>((
-  ref,
-) async {
+const _residentSubjectsCacheKey = 'resident_home_subjects_v1';
+
+String _lecturesCacheKey(String subjectId) {
+  final weekStart = _currentWeekStartSaturdayLocal();
+  final weekKey = DateFormat('yyyy-MM-dd').format(weekStart);
+  return 'resident_home_lectures_${subjectId}_$weekKey';
+}
+
+List<Map<String, dynamic>> _decodeListCache(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return <Map<String, dynamic>>[];
+  final decoded = jsonDecode(raw);
+  return List<Map<String, dynamic>>.from(
+    (decoded as List).cast<Map<String, dynamic>>(),
+  );
+}
+
+Future<void> _saveListCache(String key, List<Map<String, dynamic>> value) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(key, jsonEncode(value));
+}
+
+Future<List<Map<String, dynamic>>> _fetchResidentSubjectsFromServer() async {
   final uid = Supabase.instance.client.auth.currentUser!.id;
   final res = await Supabase.instance.client
       .from('user_subject_assignments')
@@ -50,32 +71,70 @@ final residentSubjectsProvider = FutureProvider<List<Map<String, dynamic>>>((
     return an.compareTo(bn);
   });
   return out;
-});
+}
+
+Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
+  String subjectId,
+) async {
+  final uid = Supabase.instance.client.auth.currentUser!.id;
+
+  final weekStartLocal = _currentWeekStartSaturdayLocal();
+  final weekEndLocal = weekStartLocal.add(const Duration(days: 7));
+  final weekStartUtcIso = weekStartLocal.toUtc().toIso8601String();
+  final weekEndUtcIso = weekEndLocal.toUtc().toIso8601String();
+
+  final res = await Supabase.instance.client
+      .from('lectures')
+      .select(
+        'id, resident_id, start_at, end_at, target_category_id, categories(name), practical_sessions!inner(title, subjects(name, location), subject_id)',
+      )
+      .eq('practical_sessions.subject_id', subjectId)
+      .or('resident_id.is.null,resident_id.eq.$uid')
+      .gte('start_at', weekStartUtcIso)
+      .lt('start_at', weekEndUtcIso)
+      .order('start_at', ascending: false);
+
+  return List<Map<String, dynamic>>.from(res as List);
+}
+
+final residentSubjectsProvider =
+    StreamProvider<List<Map<String, dynamic>>>((
+      ref,
+    ) async* {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = _decodeListCache(prefs.getString(_residentSubjectsCacheKey));
+      if (cached.isNotEmpty) {
+        yield cached;
+      }
+
+      try {
+        final fresh = await _fetchResidentSubjectsFromServer();
+        await _saveListCache(_residentSubjectsCacheKey, fresh);
+        yield fresh;
+      } catch (e) {
+        if (cached.isEmpty) rethrow;
+      }
+    });
 
 final myLecturesBySubjectProvider =
-    FutureProvider.family<List<Map<String, dynamic>>, String>((
+    StreamProvider.family<List<Map<String, dynamic>>, String>((
       ref,
       subjectId,
-    ) async {
-      final uid = Supabase.instance.client.auth.currentUser!.id;
+    ) async* {
+      final key = _lecturesCacheKey(subjectId);
+      final prefs = await SharedPreferences.getInstance();
+      final cached = _decodeListCache(prefs.getString(key));
+      if (cached.isNotEmpty) {
+        yield cached;
+      }
 
-      final weekStartLocal = _currentWeekStartSaturdayLocal();
-      final weekEndLocal = weekStartLocal.add(const Duration(days: 7));
-      final weekStartUtcIso = weekStartLocal.toUtc().toIso8601String();
-      final weekEndUtcIso = weekEndLocal.toUtc().toIso8601String();
-
-      final res = await Supabase.instance.client
-          .from('lectures')
-          .select(
-            'id, resident_id, start_at, end_at, target_category_id, categories(name), practical_sessions!inner(title, subjects(name, location), subject_id)',
-          )
-          .eq('practical_sessions.subject_id', subjectId)
-          .or('resident_id.is.null,resident_id.eq.$uid')
-          .gte('start_at', weekStartUtcIso)
-          .lt('start_at', weekEndUtcIso)
-          .order('start_at', ascending: false);
-
-      return List<Map<String, dynamic>>.from(res as List);
+      try {
+        final fresh = await _fetchLecturesBySubjectFromServer(subjectId);
+        await _saveListCache(key, fresh);
+        yield fresh;
+      } catch (e) {
+        if (cached.isEmpty) rethrow;
+      }
     });
 
 class ResidentHomeScreen extends ConsumerStatefulWidget {
@@ -277,8 +336,9 @@ class _SubjectLecturesTab extends ConsumerWidget {
     ).colorScheme.onSurface.withValues(alpha: 0.6);
     return RefreshIndicator(
       onRefresh: () async {
+        final fresh = await _fetchLecturesBySubjectFromServer(subjectId);
+        await _saveListCache(_lecturesCacheKey(subjectId), fresh);
         ref.invalidate(myLecturesBySubjectProvider(subjectId));
-        await ref.read(myLecturesBySubjectProvider(subjectId).future);
       },
       child: lecturesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
