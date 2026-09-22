@@ -33,10 +33,16 @@ class AttendanceSyncResult {
   final bool success;
   final String message;
   final String status;
+  final String? claimedResidentId;
+  final String? claimedResidentName;
+  final String? claimedResidentPhone;
   const AttendanceSyncResult(
     this.success,
     this.message, {
     required this.status,
+    this.claimedResidentId,
+    this.claimedResidentName,
+    this.claimedResidentPhone,
   });
 }
 
@@ -131,10 +137,13 @@ class AttendanceSyncService {
       }
       if ((result['message'] as String?) ==
           'lecture_claimed_by_other_resident') {
-        return const AttendanceSyncResult(
+        return AttendanceSyncResult(
           false,
           'تم استلام هذه المحاضرة من مقيم آخر',
           status: 'lecture_claimed_by_other_resident',
+          claimedResidentId: result['claimed_resident_id']?.toString(),
+          claimedResidentName: result['claimed_resident_name']?.toString(),
+          claimedResidentPhone: result['claimed_resident_phone']?.toString(),
         );
       }
       if ((result['message'] as String?) ==

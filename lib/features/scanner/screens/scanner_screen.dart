@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:gap/gap.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/attendance_sync_service.dart';
 import '../../../core/services/ble_attendance_codec.dart';
@@ -255,9 +256,7 @@ class _State extends ConsumerState<ScannerScreen> {
         });
 
         if (result.status == 'lecture_claimed_by_other_resident') {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تم استلام هذه المحاضرة من مقيم آخر')),
-          );
+          await _showLectureClaimedDialog(result);
           await _stopScanning();
           if (mounted && context.mounted) Navigator.of(context).maybePop();
         }
@@ -266,6 +265,74 @@ class _State extends ConsumerState<ScannerScreen> {
     } finally {
       _inFlightKeys.remove(opKey);
     }
+  }
+
+  String? _normalizeWhatsappPhone(String? rawPhone) {
+    if (rawPhone == null) return null;
+    final trimmed = rawPhone.trim();
+    if (trimmed.isEmpty) return null;
+
+    final digitsOnly = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digitsOnly.isEmpty) return null;
+
+    if (digitsOnly.startsWith('00') && digitsOnly.length > 2) {
+      return digitsOnly.substring(2);
+    }
+    return digitsOnly;
+  }
+
+  Future<void> _openWhatsApp(String? phone) async {
+    final normalized = _normalizeWhatsappPhone(phone);
+    if (normalized == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('رقم الهاتف غير متوفر للتواصل عبر واتساب'),
+        ),
+      );
+      return;
+    }
+
+    final uri = Uri.parse('https://wa.me/$normalized');
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر فتح واتساب على هذا الجهاز')),
+      );
+    }
+  }
+
+  Future<void> _showLectureClaimedDialog(AttendanceSyncResult result) async {
+    final residentName = result.claimedResidentName?.trim();
+    final residentPhone = result.claimedResidentPhone?.trim();
+    final hasPhone = residentPhone != null && residentPhone.isNotEmpty;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('المحاضرة مستلمة مسبقاً'),
+        content: Text(
+          hasPhone
+              ? 'تم استلام هذه المحاضرة من مقيم آخر${residentName != null && residentName.isNotEmpty ? ' ($residentName)' : ''}. يمكنك التواصل معه عبر واتساب.'
+              : 'تم استلام هذه المحاضرة من مقيم آخر${residentName != null && residentName.isNotEmpty ? ' ($residentName)' : ''}.',
+        ),
+        actions: [
+          if (hasPhone)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _openWhatsApp(residentPhone);
+              },
+              icon: const Icon(Icons.chat_rounded),
+              label: const Text('واتساب'),
+            ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('حسناً'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _delegateLecture() async {
