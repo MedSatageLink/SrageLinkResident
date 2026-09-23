@@ -39,7 +39,10 @@ List<Map<String, dynamic>> _decodeListCache(String? raw) {
   );
 }
 
-Future<void> _saveListCache(String key, List<Map<String, dynamic>> value) async {
+Future<void> _saveListCache(
+  String key,
+  List<Map<String, dynamic>> value,
+) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(key, jsonEncode(value));
 }
@@ -97,24 +100,23 @@ Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
   return List<Map<String, dynamic>>.from(res as List);
 }
 
-final residentSubjectsProvider =
-    StreamProvider<List<Map<String, dynamic>>>((
-      ref,
-    ) async* {
-      final prefs = await SharedPreferences.getInstance();
-      final cached = _decodeListCache(prefs.getString(_residentSubjectsCacheKey));
-      if (cached.isNotEmpty) {
-        yield cached;
-      }
+final residentSubjectsProvider = StreamProvider<List<Map<String, dynamic>>>((
+  ref,
+) async* {
+  final prefs = await SharedPreferences.getInstance();
+  final cached = _decodeListCache(prefs.getString(_residentSubjectsCacheKey));
+  if (cached.isNotEmpty) {
+    yield cached;
+  }
 
-      try {
-        final fresh = await _fetchResidentSubjectsFromServer();
-        await _saveListCache(_residentSubjectsCacheKey, fresh);
-        yield fresh;
-      } catch (e) {
-        if (cached.isEmpty) rethrow;
-      }
-    });
+  try {
+    final fresh = await _fetchResidentSubjectsFromServer();
+    await _saveListCache(_residentSubjectsCacheKey, fresh);
+    yield fresh;
+  } catch (e) {
+    if (cached.isEmpty) rethrow;
+  }
+});
 
 final myLecturesBySubjectProvider =
     StreamProvider.family<List<Map<String, dynamic>>, String>((
