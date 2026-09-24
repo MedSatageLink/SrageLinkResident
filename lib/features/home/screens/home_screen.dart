@@ -16,19 +16,16 @@ import '../../../core/theme/theme_mode_provider.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/services/device_service.dart';
 
-DateTime _currentWeekStartSaturdayLocal() {
+DateTime _todayStartLocal() {
   final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final daysSinceSaturday = (today.weekday - DateTime.saturday + 7) % 7;
-  return today.subtract(Duration(days: daysSinceSaturday));
+  return DateTime(now.year, now.month, now.day);
 }
 
 const _residentSubjectsCacheKey = 'resident_home_subjects_v1';
 
 String _lecturesCacheKey(String subjectId) {
-  final weekStart = _currentWeekStartSaturdayLocal();
-  final weekKey = DateFormat('yyyy-MM-dd').format(weekStart);
-  return 'resident_home_lectures_${subjectId}_$weekKey';
+  final dayKey = DateFormat('yyyy-MM-dd').format(_todayStartLocal());
+  return 'resident_home_lectures_${subjectId}_$dayKey';
 }
 
 List<Map<String, dynamic>> _decodeListCache(String? raw) {
@@ -81,10 +78,10 @@ Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
 ) async {
   final uid = Supabase.instance.client.auth.currentUser!.id;
 
-  final weekStartLocal = _currentWeekStartSaturdayLocal();
-  final weekEndLocal = weekStartLocal.add(const Duration(days: 7));
-  final weekStartUtcIso = weekStartLocal.toUtc().toIso8601String();
-  final weekEndUtcIso = weekEndLocal.toUtc().toIso8601String();
+  final dayStartLocal = _todayStartLocal();
+  final dayEndLocal = dayStartLocal.add(const Duration(days: 1));
+  final dayStartUtcIso = dayStartLocal.toUtc().toIso8601String();
+  final dayEndUtcIso = dayEndLocal.toUtc().toIso8601String();
 
   final res = await Supabase.instance.client
       .from('lectures')
@@ -93,8 +90,8 @@ Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
       )
       .eq('practical_sessions.subject_id', subjectId)
       .or('resident_id.is.null,resident_id.eq.$uid')
-      .gte('start_at', weekStartUtcIso)
-      .lt('start_at', weekEndUtcIso)
+      .gte('start_at', dayStartUtcIso)
+      .lt('start_at', dayEndUtcIso)
       .order('start_at', ascending: false);
 
   return List<Map<String, dynamic>>.from(res as List);
@@ -359,7 +356,7 @@ class _SubjectLecturesTab extends ConsumerWidget {
                           color: muted.withValues(alpha: 0.4),
                         ),
                         const Gap(16),
-                        const Text('لا توجد محاضرات لهذه المادة هذا الأسبوع'),
+                        const Text('لا توجد محاضرات لهذه المادة اليوم'),
                       ],
                     ),
                   ),
