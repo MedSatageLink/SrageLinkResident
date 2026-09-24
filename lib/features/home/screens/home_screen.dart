@@ -343,43 +343,36 @@ class _SubjectLecturesTab extends ConsumerWidget {
     BuildContext context, {
     required String? phone,
     required String? ownerResidentId,
+    required String lectureId,
     required String sessionTitle,
     required String subjectName,
   }) async {
     String? resolvedPhone = phone;
     if (_normalizeWhatsappPhone(resolvedPhone) == null &&
-        ownerResidentId != null &&
-        ownerResidentId.isNotEmpty) {
+        lectureId.isNotEmpty) {
       try {
-        final row = await Supabase.instance.client
-            .from('profiles')
-            .select('phone_number')
-            .eq('id', ownerResidentId)
-            .maybeSingle();
-        if (row != null) {
-          resolvedPhone =
-              (Map<String, dynamic>.from(row))['phone_number'] as String?;
+        final res = await Supabase.instance.client.rpc(
+          'get_lecture_owner_contact_for_handover',
+          params: {'p_lecture_id': lectureId},
+        );
+        final map = Map<String, dynamic>.from(res as Map);
+        if ((map['status'] as String?) == 'ok') {
+          resolvedPhone = map['resident_phone'] as String?;
         }
       } catch (_) {
-        // Keep fallback message below.
       }
     }
 
     final normalized = _normalizeWhatsappPhone(resolvedPhone);
     if (normalized == null) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'رقم الهاتف غير متوفر. تأكد من إضافة رقم المقيم في الحساب.',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('رقم الهاتف غير متوفر.')));
       return;
     }
 
-    final text =
-        'مرحبا، يرجى توكيلي "$sessionTitle" من ستاج "$subjectName" وشكرا.';
+    final text = 'مرحبا، يرجى توكيلي $sessionTitle من ستاج $subjectName وشكرا.';
     final encodedText = Uri.encodeComponent(text);
     final uri = Uri.parse('https://wa.me/$normalized?text=$encodedText');
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -488,7 +481,9 @@ class _SubjectLecturesTab extends ConsumerWidget {
                                 children: [
                                   Text(
                                     sessionTitle,
-                                    style: Theme.of(context).textTheme.titleSmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
                                   ),
                                   Text(
                                     subject,
@@ -564,6 +559,7 @@ class _SubjectLecturesTab extends ConsumerWidget {
                                   context,
                                   phone: ownerPhone,
                                   ownerResidentId: lectureResidentId,
+                                  lectureId: l['id'] as String,
                                   sessionTitle: sessionTitle,
                                   subjectName: subject.toString(),
                                 ),
