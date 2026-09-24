@@ -342,21 +342,44 @@ class _SubjectLecturesTab extends ConsumerWidget {
   Future<void> _openWhatsApp(
     BuildContext context, {
     required String? phone,
+    required String? ownerResidentId,
     required String sessionTitle,
     required String subjectName,
   }) async {
-    final normalized = _normalizeWhatsappPhone(phone);
+    String? resolvedPhone = phone;
+    if (_normalizeWhatsappPhone(resolvedPhone) == null &&
+        ownerResidentId != null &&
+        ownerResidentId.isNotEmpty) {
+      try {
+        final row = await Supabase.instance.client
+            .from('profiles')
+            .select('phone_number')
+            .eq('id', ownerResidentId)
+            .maybeSingle();
+        if (row != null) {
+          resolvedPhone =
+              (Map<String, dynamic>.from(row))['phone_number'] as String?;
+        }
+      } catch (_) {
+        // Keep fallback message below.
+      }
+    }
+
+    final normalized = _normalizeWhatsappPhone(resolvedPhone);
     if (normalized == null) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('رقم الهاتف غير متوفر للتواصل عبر واتساب'),
+          content: Text(
+            'رقم الهاتف غير متوفر. تأكد من إضافة رقم المقيم في الحساب.',
+          ),
         ),
       );
       return;
     }
 
-    final text = 'مرحبا، يرجى توكيلي "$sessionTitle" من ستاج "$subjectName" وشكرا.';
+    final text =
+        'مرحبا، يرجى توكيلي "$sessionTitle" من ستاج "$subjectName" وشكرا.';
     final encodedText = Uri.encodeComponent(text);
     final uri = Uri.parse('https://wa.me/$normalized?text=$encodedText');
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -411,19 +434,21 @@ class _SubjectLecturesTab extends ConsumerWidget {
                 itemCount: lectures.length,
                 itemBuilder: (context, i) {
                   final l = lectures[i];
-                  final myResidentId = Supabase.instance.client.auth.currentUser?.id;
+                  final myResidentId =
+                      Supabase.instance.client.auth.currentUser?.id;
                   final lectureResidentId = l['resident_id'] as String?;
                   final claimedByOther =
-                    lectureResidentId != null &&
-                    myResidentId != null &&
-                    lectureResidentId != myResidentId;
+                      lectureResidentId != null &&
+                      myResidentId != null &&
+                      lectureResidentId != myResidentId;
                   final ownerProfile = l['profiles'] as Map<String, dynamic>?;
-                  final ownerName = (ownerProfile?['full_name'] as String?)?.trim();
-                  final ownerPhone = (ownerProfile?['phone_number'] as String?)?.trim();
+                  final ownerPhone = (ownerProfile?['phone_number'] as String?)
+                      ?.trim();
 
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
-                  final sessionTitle = (session?['title'] as String?)?.trim() ?? '—';
+                  final sessionTitle =
+                      (session?['title'] as String?)?.trim() ?? '—';
                   final categoryName =
                       (l['categories'] as Map<String, dynamic>?)?['name']
                           as String? ??
@@ -436,9 +461,9 @@ class _SubjectLecturesTab extends ConsumerWidget {
                     margin: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                    onTap: claimedByOther
-                      ? null
-                      : () => context.push('/scan/${l['id']}'),
+                      onTap: claimedByOther
+                          ? null
+                          : () => context.push('/scan/${l['id']}'),
                       child: Padding(
                         padding: const EdgeInsets.all(14),
                         child: Row(
@@ -461,42 +486,9 @@ class _SubjectLecturesTab extends ConsumerWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          sessionTitle,
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.titleSmall,
-                                        ),
-                                      ),
-                                      if (claimedByOther)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 3,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.orange.withValues(
-                                              alpha: 0.14,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              999,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            ownerName != null && ownerName.isNotEmpty
-                                                ? 'مستلمة: $ownerName'
-                                                : 'مستلمة من مقيم آخر',
-                                            style: const TextStyle(
-                                              color: Color(0xFF9A3412),
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
+                                  Text(
+                                    sessionTitle,
+                                    style: Theme.of(context).textTheme.titleSmall,
                                   ),
                                   Text(
                                     subject,
@@ -519,14 +511,22 @@ class _SubjectLecturesTab extends ConsumerWidget {
                                         color: muted,
                                       ),
                                       const Gap(4),
-                                      Text(
-                                        formatLectureLine(l),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(fontSize: 12),
+                                      Expanded(
+                                        child: Text(
+                                          formatLectureLine(l),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(fontSize: 12),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
-                                      const Gap(8),
+                                    ],
+                                  ),
+                                  const Gap(2),
+                                  Row(
+                                    children: [
                                       Icon(
                                         Icons.location_on_outlined,
                                         size: 13,
@@ -555,18 +555,20 @@ class _SubjectLecturesTab extends ConsumerWidget {
                               ),
                             ),
                             if (claimedByOther)
-                              IconButton(
-                                tooltip: 'التواصل عبر واتساب',
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF25D366),
+                                  visualDensity: VisualDensity.compact,
+                                ),
                                 onPressed: () => _openWhatsApp(
                                   context,
                                   phone: ownerPhone,
+                                  ownerResidentId: lectureResidentId,
                                   sessionTitle: sessionTitle,
                                   subjectName: subject.toString(),
                                 ),
-                                icon: const Icon(
-                                  Icons.chat_rounded,
-                                  color: Color(0xFF25D366),
-                                ),
+                                icon: const Icon(Icons.chat_rounded, size: 18),
+                                label: const Text('واتساب'),
                               )
                             else
                               const Icon(
