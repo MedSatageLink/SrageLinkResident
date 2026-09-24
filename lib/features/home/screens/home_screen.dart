@@ -10,6 +10,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
@@ -76,8 +77,6 @@ Future<List<Map<String, dynamic>>> _fetchResidentSubjectsFromServer() async {
 Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
   String subjectId,
 ) async {
-  final uid = Supabase.instance.client.auth.currentUser!.id;
-
   final dayStartLocal = _todayStartLocal();
   final dayEndLocal = dayStartLocal.add(const Duration(days: 1));
   final dayStartUtcIso = dayStartLocal.toUtc().toIso8601String();
@@ -86,10 +85,9 @@ Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
   final res = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, resident_id, start_at, end_at, target_category_id, categories(name), practical_sessions!inner(title, subjects(name, location), subject_id)',
+        'id, resident_id, start_at, end_at, target_category_id, categories(name), profiles(full_name, phone_number), practical_sessions!inner(title, subjects(name, location), subject_id)',
       )
       .eq('practical_sessions.subject_id', subjectId)
-      .or('resident_id.is.null,resident_id.eq.$uid')
       .gte('start_at', dayStartUtcIso)
       .lt('start_at', dayEndUtcIso)
       .order('start_at', ascending: false);
@@ -327,6 +325,49 @@ class _SubjectLecturesTab extends ConsumerWidget {
     required this.formatLectureLine,
   });
 
+  String? _normalizeWhatsappPhone(String? rawPhone) {
+    if (rawPhone == null) return null;
+    final trimmed = rawPhone.trim();
+    if (trimmed.isEmpty) return null;
+
+    final digitsOnly = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digitsOnly.isEmpty) return null;
+
+    if (digitsOnly.startsWith('00') && digitsOnly.length > 2) {
+      return digitsOnly.substring(2);
+    }
+    return digitsOnly;
+  }
+
+  Future<void> _openWhatsApp(
+    BuildContext context, {
+    required String? phone,
+    required String sessionTitle,
+    required String subjectName,
+  }) async {
+    final normalized = _normalizeWhatsappPhone(phone);
+    if (normalized == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('رقم الهاتف غير متوفر للتواصل عبر واتساب'),
+        ),
+      );
+      return;
+    }
+
+    final text = 'مرحبا، يرجى توكيلي "$sessionTitle" من ستاج "$subjectName" وشكرا.';
+    final encodedText = Uri.encodeComponent(text);
+    final uri = Uri.parse('https://wa.me/$normalized?text=$encodedText');
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر فتح واتساب على هذا الجهاز')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lecturesAsync = ref.watch(myLecturesBySubjectProvider(subjectId));
@@ -370,8 +411,19 @@ class _SubjectLecturesTab extends ConsumerWidget {
                 itemCount: lectures.length,
                 itemBuilder: (context, i) {
                   final l = lectures[i];
+                  final myResidentId = Supabase.instance.client.auth.currentUser?.id;
+                  final lectureResidentId = l['resident_id'] as String?;
+                  final claimedByOther =
+                    lectureResidentId != null &&
+                    myResidentId != null &&
+                    lectureResidentId != myResidentId;
+                  final ownerProfile = l['profiles'] as Map<String, dynamic>?;
+                  final ownerName = (ownerProfile?['full_name'] as String?)?.trim();
+                  final ownerPhone = (ownerProfile?['phone_number'] as String?)?.trim();
+
                   final session =
                       l['practical_sessions'] as Map<String, dynamic>?;
+                  final sessionTitle = (session?['title'] as String?)?.trim() ?? '—';
                   final categoryName =
                       (l['categories'] as Map<String, dynamic>?)?['name']
                           as String? ??
@@ -384,7 +436,9 @@ class _SubjectLecturesTab extends ConsumerWidget {
                     margin: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => context.push('/scan/${l['id']}'),
+                    onTap: claimedByOther
+                      ? null
+                      : () => context.push('/scan/${l['id']}'),
                       child: Padding(
                         padding: const EdgeInsets.all(14),
                         child: Row(
@@ -407,11 +461,42 @@ class _SubjectLecturesTab extends ConsumerWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    session?['title'] as String? ?? '—',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleSmall,
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          sessionTitle,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                      ),
+                                      if (claimedByOther)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.withValues(
+                                              alpha: 0.14,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            ownerName != null && ownerName.isNotEmpty
+                                                ? 'مستلمة: $ownerName'
+                                                : 'مستلمة من مقيم آخر',
+                                            style: const TextStyle(
+                                              color: Color(0xFF9A3412),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                   Text(
                                     subject,
@@ -469,10 +554,25 @@ class _SubjectLecturesTab extends ConsumerWidget {
                                 ],
                               ),
                             ),
-                            const Icon(
-                              Icons.bluetooth_searching_rounded,
-                              color: AppColors.primary,
-                            ),
+                            if (claimedByOther)
+                              IconButton(
+                                tooltip: 'التواصل عبر واتساب',
+                                onPressed: () => _openWhatsApp(
+                                  context,
+                                  phone: ownerPhone,
+                                  sessionTitle: sessionTitle,
+                                  subjectName: subject.toString(),
+                                ),
+                                icon: const Icon(
+                                  Icons.chat_rounded,
+                                  color: Color(0xFF25D366),
+                                ),
+                              )
+                            else
+                              const Icon(
+                                Icons.bluetooth_searching_rounded,
+                                color: AppColors.primary,
+                              ),
                           ],
                         ),
                       ),
