@@ -359,8 +359,7 @@ class _SubjectLecturesTab extends ConsumerWidget {
         if ((map['status'] as String?) == 'ok') {
           resolvedPhone = map['resident_phone'] as String?;
         }
-      } catch (_) {
-      }
+      } catch (_) {}
     }
 
     final normalized = _normalizeWhatsappPhone(resolvedPhone);

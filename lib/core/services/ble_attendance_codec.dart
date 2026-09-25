@@ -3,10 +3,12 @@ import 'dart:typed_data';
 class BleBoundAttendancePacket {
   final String studentId;
   final int lectureToken16;
+  final int eventCode;
 
   const BleBoundAttendancePacket({
     required this.studentId,
     required this.lectureToken16,
+    required this.eventCode,
   });
 }
 
@@ -15,8 +17,8 @@ class BleAttendanceCodec {
   static const String markerServiceUuidFull =
       '0000a100-0000-1000-8000-00805f9b34fb';
 
-  // New sender format: [3, student_uuid_16_bytes, lecture_token_hi, lecture_token_lo]
-  static const int studentLectureBindingVersion = 3;
+  // New sender format: [4, event_code, student_uuid_16_bytes, lecture_token_hi, lecture_token_lo]
+  static const int studentLectureBindingVersion = 4;
 
   static String? parse(Uint8List bytes) {
     if (bytes.length != 17 && bytes.length != 18) return null;
@@ -44,11 +46,17 @@ class BleAttendanceCodec {
   }
 
   static BleBoundAttendancePacket? parseBoundPacket(Uint8List bytes) {
-    if (bytes.length != 19) return null;
+    if (bytes.length != 20) return null;
     if (bytes[0] != studentLectureBindingVersion) return null;
-    final student = _bytesToUuid(bytes.sublist(1, 17));
-    final token = ((bytes[17] & 0xFF) << 8) | (bytes[18] & 0xFF);
-    return BleBoundAttendancePacket(studentId: student, lectureToken16: token);
+    final eventCode = bytes[1] & 0xFF;
+    if (eventCode != 1 && eventCode != 2) return null;
+    final student = _bytesToUuid(bytes.sublist(2, 18));
+    final token = ((bytes[18] & 0xFF) << 8) | (bytes[19] & 0xFF);
+    return BleBoundAttendancePacket(
+      studentId: student,
+      lectureToken16: token,
+      eventCode: eventCode,
+    );
   }
 
   static String? parseServiceUuids(Iterable<String> serviceUuids) {

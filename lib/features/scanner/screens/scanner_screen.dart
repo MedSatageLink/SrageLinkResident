@@ -200,6 +200,11 @@ class _State extends ConsumerState<ScannerScreen> {
         continue;
       }
 
+      final expectedEventCode = mode == AttendanceEventType.checkIn ? 1 : 2;
+      if (bound.eventCode != expectedEventCode) {
+        continue;
+      }
+
       final dedupeKey = '${bound.studentId}_${widget.lectureId}_${mode.value}';
       if (_sessionProcessedKeys.contains(dedupeKey)) {
         continue;
