@@ -104,21 +104,47 @@ class BleAttendanceCodec {
     }
 
     // also scan raw list for 4/8-char tokens (not normalized)
+    // Prefer 8-char payload: [token_hi2][token_lo2][event][reserved]
+    int? parsedToken;
+    int? parsedEvent;
+
     for (final raw in serviceUuids) {
       final clean = raw.replaceAll('-', '').toLowerCase();
-      if (clean.length == 4) {
+      if (clean.length != 8) continue;
+      try {
+        final tokenHex = clean.substring(0, 4);
+        final eventHex = clean.substring(4, 6);
+        final token = int.parse(tokenHex, radix: 16);
+        final event = int.parse(eventHex, radix: 16);
+        if (event == 1 || event == 2) {
+          parsedToken = token;
+          parsedEvent = event;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    // Fallback for legacy short token UUID (4-char), ignore marker UUID a100.
+    if (parsedToken == null) {
+      for (final raw in serviceUuids) {
+        final clean = raw.replaceAll('-', '').toLowerCase();
+        if (clean.length != 4) continue;
+        if (clean == 'a100') continue;
         try {
-          out['lectureToken'] = int.parse(clean, radix: 16);
-        } catch (_) {}
-      } else if (clean.length == 8) {
-        try {
-          final tokenHex = clean.substring(0, 4);
-          final eventHex = clean.substring(4, 6);
-          out['lectureToken'] = int.parse(tokenHex, radix: 16);
-          out['eventCode'] = int.parse(eventHex, radix: 16);
+          parsedToken = int.parse(clean, radix: 16);
+          break;
         } catch (_) {}
       }
     }
+
+    if (parsedToken != null) out['lectureToken'] = parsedToken;
+    if (parsedEvent != null) out['eventCode'] = parsedEvent;
+
+    /*
+     * NOTE:
+     * We intentionally do not treat 4-char marker UUIDs (a100) as lecture tokens,
+     * because that causes false token mismatches (e.g., 41216 from a100).
+     */
 
     return out;
   }

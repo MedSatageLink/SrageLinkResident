@@ -182,11 +182,12 @@ class _State extends ConsumerState<ScannerScreen> {
 
       String? parsedLectureId;
       // Try parse student/lecture/event from service UUIDs as a cross-platform fallback
-        final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
+      final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
           rawServiceUuids.map((g) => g.toString()));
       final svcStudent = svcInfo['studentUuid'] as String?;
       final svcToken = svcInfo['lectureToken'] as int?;
       final svcEvent = svcInfo['eventCode'] as int?;
+
       for (final bytes in candidates) {
         final lecture = BleAttendanceCodec.parseLectureId(
           Uint8List.fromList(bytes),
