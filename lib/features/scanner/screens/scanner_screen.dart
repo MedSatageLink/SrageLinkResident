@@ -83,7 +83,7 @@ class _State extends ConsumerState<ScannerScreen> {
         onError: (_) {},
       );
       await FlutterBluePlus.startScan(
-        timeout: const Duration(days: 1),
+        timeout: const Duration(days: 365),
         androidUsesFineLocation: false,
       );
       if (!mounted) return;
@@ -165,7 +165,28 @@ class _State extends ConsumerState<ScannerScreen> {
         }
       }
 
+      // Also include full service UUIDs as candidate raw bytes when present
+      try {
+        for (final guid in rawServiceUuids) {
+          final su = guid.toString();
+          final s = su.replaceAll('-', '').toLowerCase();
+          if (s.length == 32) {
+            final bytes = <int>[];
+            for (var i = 0; i < 16; i++) {
+              bytes.add(int.parse(s.substring(i * 2, i * 2 + 2), radix: 16));
+            }
+            candidates.add(bytes);
+          }
+        }
+      } catch (_) {}
+
       String? parsedLectureId;
+      // Try parse student/lecture/event from service UUIDs as a cross-platform fallback
+        final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
+          rawServiceUuids.map((g) => g.toString()));
+      final svcStudent = svcInfo['studentUuid'] as String?;
+      final svcToken = svcInfo['lectureToken'] as int?;
+      final svcEvent = svcInfo['eventCode'] as int?;
       for (final bytes in candidates) {
         final lecture = BleAttendanceCodec.parseLectureId(
           Uint8List.fromList(bytes),
@@ -182,6 +203,17 @@ class _State extends ConsumerState<ScannerScreen> {
         if (bound != null) {
           break;
         }
+      }
+
+      // If manufacturer/serviceData payload missing but service UUIDs provided, synthesize bound info
+      if (bound == null && svcStudent != null && svcToken != null && svcEvent != null) {
+        try {
+          bound = BleBoundAttendancePacket(
+            studentId: svcStudent,
+            lectureToken16: svcToken,
+            eventCode: svcEvent,
+          );
+        } catch (_) {}
       }
 
       if (bound == null) {

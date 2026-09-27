@@ -79,6 +79,50 @@ class BleAttendanceCodec {
     return null;
   }
 
+  /// Parse service UUIDs broadcasted by student devices.
+  /// Returns map with keys: 'studentUuid' (String), 'lectureToken' (int), 'eventCode' (int)
+  static Map<String, dynamic> parseServiceBroadcastInfo(Iterable<String> serviceUuids) {
+    final normalized = <String>[];
+    for (final uuid in serviceUuids) {
+      final n = _tryNormalizeUuid(uuid);
+      if (n != null) normalized.add(n);
+    }
+    final out = <String, dynamic>{};
+    if (normalized.isEmpty) return out;
+
+    // detect marker
+    final hasMarker = normalized.contains(markerServiceUuidFull);
+    if (!hasMarker) return out;
+
+    // find full-length UUID (student id)
+    for (final uuid in normalized) {
+      if (uuid == markerServiceUuidFull) continue;
+      if (uuid.length == 36) {
+        out['studentUuid'] = uuid;
+        break;
+      }
+    }
+
+    // also scan raw list for 4/8-char tokens (not normalized)
+    for (final raw in serviceUuids) {
+      final clean = raw.replaceAll('-', '').toLowerCase();
+      if (clean.length == 4) {
+        try {
+          out['lectureToken'] = int.parse(clean, radix: 16);
+        } catch (_) {}
+      } else if (clean.length == 8) {
+        try {
+          final tokenHex = clean.substring(0, 4);
+          final eventHex = clean.substring(4, 6);
+          out['lectureToken'] = int.parse(tokenHex, radix: 16);
+          out['eventCode'] = int.parse(eventHex, radix: 16);
+        } catch (_) {}
+      }
+    }
+
+    return out;
+  }
+
   static String normalizeUuid(String uuid) {
     final clean = uuid.replaceAll('-', '').toLowerCase();
     if (clean.length != 32) {
