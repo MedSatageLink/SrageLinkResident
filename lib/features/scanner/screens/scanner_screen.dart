@@ -183,7 +183,8 @@ class _State extends ConsumerState<ScannerScreen> {
       String? parsedLectureId;
       // Try parse student/lecture/event from service UUIDs as a cross-platform fallback
       final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
-          rawServiceUuids.map((g) => g.toString()));
+        rawServiceUuids.map((g) => g.toString()),
+      );
       final svcStudent = svcInfo['studentUuid'] as String?;
       final svcToken = svcInfo['lectureToken'] as int?;
       final svcEvent = svcInfo['eventCode'] as int?;
@@ -207,7 +208,10 @@ class _State extends ConsumerState<ScannerScreen> {
       }
 
       // If manufacturer/serviceData payload missing but service UUIDs provided, synthesize bound info
-      if (bound == null && svcStudent != null && svcToken != null && svcEvent != null) {
+      if (bound == null &&
+          svcStudent != null &&
+          svcToken != null &&
+          svcEvent != null) {
         try {
           bound = BleBoundAttendancePacket(
             studentId: svcStudent,

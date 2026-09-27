@@ -81,7 +81,9 @@ class BleAttendanceCodec {
 
   /// Parse service UUIDs broadcasted by student devices.
   /// Returns map with keys: 'studentUuid' (String), 'lectureToken' (int), 'eventCode' (int)
-  static Map<String, dynamic> parseServiceBroadcastInfo(Iterable<String> serviceUuids) {
+  static Map<String, dynamic> parseServiceBroadcastInfo(
+    Iterable<String> serviceUuids,
+  ) {
     final normalized = <String>[];
     for (final uuid in serviceUuids) {
       final n = _tryNormalizeUuid(uuid);
