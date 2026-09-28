@@ -152,17 +152,29 @@ class BleAttendanceCodec {
       }
     }
 
-    // also scan raw list for 4/8-char tokens (not normalized)
-    // Prefer 8-char payload: [token_hi2][token_lo2][event][reserved]
+    // also scan raw/expanded list for token/event payload.
+    // payload layout (8 hex chars): [token_hi2][token_lo2][event][reserved]
     int? parsedToken;
     int? parsedEvent;
 
-    for (final raw in serviceUuids) {
-      final clean = raw.replaceAll('-', '').toLowerCase();
-      if (clean.length != 8) continue;
+    Iterable<String> payloadCandidates() sync* {
+      const baseSuffix = '00001000800000805f9b34fb';
+      for (final raw in serviceUuids) {
+        final clean = raw.replaceAll('-', '').toLowerCase();
+        if (clean.length == 8) {
+          yield clean;
+          continue;
+        }
+        if (clean.length == 32 && clean.endsWith(baseSuffix)) {
+          yield clean.substring(0, 8);
+        }
+      }
+    }
+
+    for (final payload in payloadCandidates()) {
       try {
-        final tokenHex = clean.substring(0, 4);
-        final eventHex = clean.substring(4, 6);
+        final tokenHex = payload.substring(0, 4);
+        final eventHex = payload.substring(4, 6);
         final token = int.parse(tokenHex, radix: 16);
         final event = int.parse(eventHex, radix: 16);
         if (event == 1 || event == 2) {
@@ -189,11 +201,13 @@ class BleAttendanceCodec {
     if (parsedToken != null) out['lectureToken'] = parsedToken;
     if (parsedEvent != null) out['eventCode'] = parsedEvent;
 
-    for (final raw in serviceUuids) {
-      final clean = raw.replaceAll('-', '').toLowerCase();
-      if (clean.length == 8 && clean.endsWith('a500')) {
+    for (final payload in payloadCandidates()) {
+      if (payload.endsWith('a500')) {
         try {
-          out['requestNonce16'] = int.parse(clean.substring(0, 4), radix: 16);
+          out['requestNonce16'] = int.parse(
+            payload.substring(0, 4),
+            radix: 16,
+          );
           break;
         } catch (_) {}
       }

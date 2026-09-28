@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:gap/gap.dart';
 
 import '../../../core/services/attendance_sync_service.dart';
@@ -26,6 +27,7 @@ class MultiLectureScannerScreen extends ConsumerStatefulWidget {
 
 class _State extends ConsumerState<MultiLectureScannerScreen> {
   static const String _markerUuid = BleAttendanceCodec.markerServiceUuidFull;
+  final FlutterBlePeripheral _ackPeripheral = FlutterBlePeripheral();
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
@@ -37,6 +39,7 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
   final Map<String, DateTime> _recentEvents = <String, DateTime>{};
   final Set<String> _inFlightKeys = <String>{};
   final Set<String> _sessionProcessedKeys = <String>{};
+  bool _isSendingAck = false;
 
   late final Map<int, List<String>> _lectureTokenMap;
 
@@ -235,6 +238,7 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
 
       _recentEvents[dedupeKey] = now;
       await _processAttendance(
+        packet: bound,
         lectureId: lectureId,
         studentId: bound.studentId,
         eventType: mode,
@@ -243,7 +247,48 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
     }
   }
 
+  Future<void> _sendAckBurst({
+    required BleBoundAttendancePacket packet,
+    required int statusCode,
+  }) async {
+    if (_isSendingAck) return;
+    _isSendingAck = true;
+
+    final wasScanning = _isScanning;
+    try {
+      if (wasScanning) {
+        await _stopScanning();
+      }
+
+      final serviceUuids = BleAttendanceCodec.buildAckServiceUuids(
+        studentId: packet.studentId,
+        lectureToken16: packet.lectureToken16,
+        eventCode: packet.eventCode,
+        statusCode: statusCode,
+        requestNonce16: packet.requestNonce16,
+      );
+
+      await _ackPeripheral.start(
+        advertiseData: AdvertiseDataCore(serviceUuids: serviceUuids),
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+    } catch (_) {
+      // Best effort ACK.
+    } finally {
+      try {
+        await _ackPeripheral.stop();
+      } catch (_) {}
+
+      if (mounted && wasScanning && _mode != null) {
+        unawaited(_startScanning());
+      }
+      _isSendingAck = false;
+    }
+  }
+
   Future<void> _processAttendance({
+    required BleBoundAttendancePacket packet,
     required String lectureId,
     required String studentId,
     required AttendanceEventType eventType,
@@ -275,15 +320,26 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
       };
 
       if (mounted) {
+        int? ackStatusCode;
         setState(() {
           if (acceptedStatuses.contains(result.status)) {
             _acceptedCount++;
             _sessionProcessedKeys.add(sessionKey);
+            ackStatusCode = 1;
           } else if (rejectedStatuses.contains(result.status)) {
             _rejectedCount++;
             _sessionProcessedKeys.add(sessionKey);
           }
         });
+
+        if (result.status == 'queued_local' ||
+            result.status == 'queued_for_approval') {
+          ackStatusCode = 2;
+        }
+
+        if (ackStatusCode != null) {
+          unawaited(_sendAckBurst(packet: packet, statusCode: ackStatusCode!));
+        }
       }
     } catch (_) {
       // ignore transient errors
