@@ -139,17 +139,18 @@ class BleAttendanceCodec {
     final out = <String, dynamic>{};
     if (normalized.isEmpty) return out;
 
-    // detect marker
+    // detect marker (may be omitted by some platforms when adv payload is tight)
     final hasMarker = normalized.contains(markerServiceUuidFull);
-    if (!hasMarker) return out;
+    out['hasMarker'] = hasMarker;
 
-    // find full-length UUID (student id)
-    for (final uuid in normalized) {
-      if (uuid == markerServiceUuidFull) continue;
-      if (uuid.length == 36) {
-        out['studentUuid'] = uuid;
-        break;
-      }
+    // find student UUID: prefer a true 128-bit raw UUID entry (32 hex chars).
+    for (final raw in serviceUuids) {
+      final clean = raw.replaceAll('-', '').toLowerCase();
+      if (clean.length != 32) continue;
+      final n = _tryNormalizeUuid(raw);
+      if (n == null || n == markerServiceUuidFull) continue;
+      out['studentUuid'] = n;
+      break;
     }
 
     // also scan raw/expanded list for token/event payload.
@@ -204,10 +205,7 @@ class BleAttendanceCodec {
     for (final payload in payloadCandidates()) {
       if (payload.endsWith('a500')) {
         try {
-          out['requestNonce16'] = int.parse(
-            payload.substring(0, 4),
-            radix: 16,
-          );
+          out['requestNonce16'] = int.parse(payload.substring(0, 4), radix: 16);
           break;
         } catch (_) {}
       }

@@ -142,10 +142,23 @@ class _State extends ConsumerState<ScannerScreen> {
       final hasExpectedManufacturerPayload =
           expectedManufacturerPayload != null &&
           expectedManufacturerPayload.isNotEmpty;
+
+      // Parse service UUID payload early; some iOS devices may omit marker UUID.
+      final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
+        rawServiceUuids.map((g) => g.toString()),
+      );
+      final svcStudent = svcInfo['studentUuid'] as String?;
+      final svcToken = svcInfo['lectureToken'] as int?;
+      final svcEvent = svcInfo['eventCode'] as int?;
+      final svcNonce = svcInfo['requestNonce16'] as int?;
+      final hasStructuredServicePayload =
+          svcStudent != null && svcToken != null && svcEvent != null;
+
       final hasTrustedSignature =
           hasMarkerInServiceUuids ||
           hasMarkerInServiceData ||
-          hasExpectedManufacturerPayload;
+          hasExpectedManufacturerPayload ||
+          hasStructuredServicePayload;
 
       if (!hasTrustedSignature) {
         continue;
@@ -183,14 +196,7 @@ class _State extends ConsumerState<ScannerScreen> {
       } catch (_) {}
 
       String? parsedLectureId;
-      // Try parse student/lecture/event from service UUIDs as a cross-platform fallback
-      final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
-        rawServiceUuids.map((g) => g.toString()),
-      );
-      final svcStudent = svcInfo['studentUuid'] as String?;
-      final svcToken = svcInfo['lectureToken'] as int?;
-      final svcEvent = svcInfo['eventCode'] as int?;
-      final svcNonce = svcInfo['requestNonce16'] as int?;
+      // service UUID info already parsed above
 
       for (final bytes in candidates) {
         final lecture = BleAttendanceCodec.parseLectureId(

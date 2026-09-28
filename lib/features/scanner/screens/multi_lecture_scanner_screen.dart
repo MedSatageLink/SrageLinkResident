@@ -155,9 +155,20 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
           expectedManufacturerPayload != null &&
           expectedManufacturerPayload.isNotEmpty;
 
+      final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
+        rawServiceUuids.map((g) => g.toString()),
+      );
+      final svcStudent = svcInfo['studentUuid'] as String?;
+      final svcToken = svcInfo['lectureToken'] as int?;
+      final svcEvent = svcInfo['eventCode'] as int?;
+      final svcNonce = svcInfo['requestNonce16'] as int?;
+      final hasStructuredServicePayload =
+          svcStudent != null && svcToken != null && svcEvent != null;
+
       if (!(hasMarkerInServiceUuids ||
           hasMarkerInServiceData ||
-          hasExpectedManufacturerPayload)) {
+          hasExpectedManufacturerPayload ||
+          hasStructuredServicePayload)) {
         continue;
       }
 
@@ -191,14 +202,6 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
         }
       } catch (_) {}
 
-      final svcInfo = BleAttendanceCodec.parseServiceBroadcastInfo(
-        rawServiceUuids.map((g) => g.toString()),
-      );
-      final svcStudent = svcInfo['studentUuid'] as String?;
-      final svcToken = svcInfo['lectureToken'] as int?;
-      final svcEvent = svcInfo['eventCode'] as int?;
-      final svcNonce = svcInfo['requestNonce16'] as int?;
-
       BleBoundAttendancePacket? bound;
       for (final bytes in candidates) {
         bound = BleAttendanceCodec.parseBoundPacket(Uint8List.fromList(bytes));
@@ -217,10 +220,14 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
         );
       }
 
-      if (bound == null) continue;
+      if (bound == null) {
+        continue;
+      }
 
       final matchingLectureIds = _lectureTokenMap[bound.lectureToken16];
-      if (matchingLectureIds == null || matchingLectureIds.isEmpty) continue;
+      if (matchingLectureIds == null || matchingLectureIds.isEmpty) {
+        continue;
+      }
       if (matchingLectureIds.length > 1) {
         // Rare token collision; skip to avoid wrong attendance.
         continue;
@@ -228,13 +235,19 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
       final lectureId = matchingLectureIds.first;
 
       final expectedEventCode = mode == AttendanceEventType.checkIn ? 1 : 2;
-      if (bound.eventCode != expectedEventCode) continue;
+      if (bound.eventCode != expectedEventCode) {
+        continue;
+      }
 
       final dedupeKey = '${bound.studentId}_${lectureId}_${mode.value}';
-      if (_sessionProcessedKeys.contains(dedupeKey)) continue;
+      if (_sessionProcessedKeys.contains(dedupeKey)) {
+        continue;
+      }
       final now = DateTime.now();
       final recentAt = _recentEvents[dedupeKey];
-      if (recentAt != null && now.difference(recentAt).inSeconds < 8) continue;
+      if (recentAt != null && now.difference(recentAt).inSeconds < 8) {
+        continue;
+      }
 
       _recentEvents[dedupeKey] = now;
       await _processAttendance(
