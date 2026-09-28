@@ -10,7 +10,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:stagelink_resident/core/utils/app_error_message.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_mode_provider.dart';
@@ -85,7 +84,7 @@ Future<List<Map<String, dynamic>>> _fetchLecturesBySubjectFromServer(
   final res = await Supabase.instance.client
       .from('lectures')
       .select(
-        'id, resident_id, start_at, end_at, target_category_id, categories(name), profiles(full_name, phone_number), practical_sessions!inner(title, subjects(name, location), subject_id)',
+        'id, resident_id, start_at, end_at, target_category_id, categories(name), practical_sessions!inner(title, subjects(name, location), subject_id)',
       )
       .eq('practical_sessions.subject_id', subjectId)
       .gte('start_at', dayStartUtcIso)
@@ -325,64 +324,6 @@ class _SubjectLecturesTab extends ConsumerWidget {
     required this.formatLectureLine,
   });
 
-  String? _normalizeWhatsappPhone(String? rawPhone) {
-    if (rawPhone == null) return null;
-    final trimmed = rawPhone.trim();
-    if (trimmed.isEmpty) return null;
-
-    final digitsOnly = trimmed.replaceAll(RegExp(r'\D'), '');
-    if (digitsOnly.isEmpty) return null;
-
-    if (digitsOnly.startsWith('00') && digitsOnly.length > 2) {
-      return digitsOnly.substring(2);
-    }
-    return digitsOnly;
-  }
-
-  Future<void> _openWhatsApp(
-    BuildContext context, {
-    required String? phone,
-    required String? ownerResidentId,
-    required String lectureId,
-    required String sessionTitle,
-    required String subjectName,
-  }) async {
-    String? resolvedPhone = phone;
-    if (_normalizeWhatsappPhone(resolvedPhone) == null &&
-        lectureId.isNotEmpty) {
-      try {
-        final res = await Supabase.instance.client.rpc(
-          'get_lecture_owner_contact_for_handover',
-          params: {'p_lecture_id': lectureId},
-        );
-        final map = Map<String, dynamic>.from(res as Map);
-        if ((map['status'] as String?) == 'ok') {
-          resolvedPhone = map['resident_phone'] as String?;
-        }
-      } catch (_) {}
-    }
-
-    final normalized = _normalizeWhatsappPhone(resolvedPhone);
-    if (normalized == null) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('رقم الهاتف غير متوفر.')));
-      return;
-    }
-
-    final text = 'مرحبا، يرجى توكيلي $sessionTitle من ستاج $subjectName وشكرا.';
-    final encodedText = Uri.encodeComponent(text);
-    final uri = Uri.parse('https://wa.me/$normalized?text=$encodedText');
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-
-    if (!launched && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح واتساب على هذا الجهاز')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lecturesAsync = ref.watch(myLecturesBySubjectProvider(subjectId));
@@ -418,164 +359,165 @@ class _SubjectLecturesTab extends ConsumerWidget {
                   ),
                 ],
               )
-            : ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                itemCount: lectures.length,
-                itemBuilder: (context, i) {
-                  final l = lectures[i];
-                  final myResidentId =
-                      Supabase.instance.client.auth.currentUser?.id;
-                  final lectureResidentId = l['resident_id'] as String?;
-                  final claimedByOther =
-                      lectureResidentId != null &&
-                      myResidentId != null &&
-                      lectureResidentId != myResidentId;
-                  final ownerProfile = l['profiles'] as Map<String, dynamic>?;
-                  final ownerPhone = (ownerProfile?['phone_number'] as String?)
-                      ?.trim();
-
-                  final session =
-                      l['practical_sessions'] as Map<String, dynamic>?;
-                  final sessionTitle =
-                      (session?['title'] as String?)?.trim() ?? '—';
-                  final categoryName =
-                      (l['categories'] as Map<String, dynamic>?)?['name']
-                          as String? ??
-                      '—';
-                  final subject =
-                      (session?['subjects']
-                          as Map<String, dynamic>?)?['name'] ??
-                      '—';
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: claimedByOther
-                          ? null
-                          : () => context.push('/scan/${l['id']}'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 52,
-                              height: 52,
-                              decoration: BoxDecoration(
-                                color: AppColors.primaryContainer,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(
-                                Icons.bluetooth_searching_rounded,
-                                color: AppColors.primary,
-                                size: 28,
-                              ),
+            : Column(
+                children: [
+                  if (lectures.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () => context.push(
+                            '/scan-subject/$subjectId',
+                            extra: lectures,
+                          ),
+                          icon: const Icon(Icons.groups_rounded),
+                          label: Text(
+                            'تسجيل جماعي لليوم (${lectures.length} جلسات)',
+                          ),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            const Gap(14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      itemCount: lectures.length,
+                      itemBuilder: (context, i) {
+                        final l = lectures[i];
+                        final session =
+                            l['practical_sessions'] as Map<String, dynamic>?;
+                        final sessionTitle =
+                            (session?['title'] as String?)?.trim() ?? '—';
+                        final categoryName =
+                            (l['categories'] as Map<String, dynamic>?)?['name']
+                                as String? ??
+                            '—';
+                        final subject =
+                            (session?['subjects']
+                                as Map<String, dynamic>?)?['name'] ??
+                            '—';
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => context.push('/scan/${l['id']}'),
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    sessionTitle,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleSmall,
+                                  Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primaryContainer,
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: Icon(
+                                      Icons.bluetooth_searching_rounded,
+                                      color: AppColors.primary,
+                                      size: 28,
+                                    ),
                                   ),
-                                  Text(
-                                    subject,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodyMedium,
-                                  ),
-                                  const Gap(2),
-                                  Text(
-                                    categoryName,
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(color: muted),
-                                  ),
-                                  const Gap(4),
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.event_outlined,
-                                        size: 13,
-                                        color: muted,
-                                      ),
-                                      const Gap(4),
-                                      Expanded(
-                                        child: Text(
-                                          formatLectureLine(l),
+                                  const Gap(14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          sessionTitle,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                        Text(
+                                          subject,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium,
+                                        ),
+                                        const Gap(2),
+                                        Text(
+                                          categoryName,
                                           style: Theme.of(context)
                                               .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(fontSize: 12),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                              .bodySmall
+                                              ?.copyWith(color: muted),
                                         ),
-                                      ),
-                                    ],
+                                        const Gap(4),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.event_outlined,
+                                              size: 13,
+                                              color: muted,
+                                            ),
+                                            const Gap(4),
+                                            Expanded(
+                                              child: Text(
+                                                formatLectureLine(l),
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(fontSize: 12),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const Gap(2),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.location_on_outlined,
+                                              size: 13,
+                                              color: muted,
+                                            ),
+                                            const Gap(4),
+                                            Expanded(
+                                              child: Text(
+                                                ((session?['subjects']
+                                                            as Map<
+                                                              String,
+                                                              dynamic
+                                                            >?)?['location']
+                                                        as String?) ??
+                                                    '',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(fontSize: 12),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const Gap(2),
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.location_on_outlined,
-                                        size: 13,
-                                        color: muted,
-                                      ),
-                                      const Gap(4),
-                                      Expanded(
-                                        child: Text(
-                                          ((session?['subjects']
-                                                      as Map<
-                                                        String,
-                                                        dynamic
-                                                      >?)?['location']
-                                                  as String?) ??
-                                              '',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
+                                  const Icon(
+                                    Icons.bluetooth_searching_rounded,
+                                    color: AppColors.primary,
                                   ),
                                 ],
                               ),
                             ),
-                            if (claimedByOther)
-                              TextButton.icon(
-                                style: TextButton.styleFrom(
-                                  foregroundColor: const Color(0xFF25D366),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                onPressed: () => _openWhatsApp(
-                                  context,
-                                  phone: ownerPhone,
-                                  ownerResidentId: lectureResidentId,
-                                  lectureId: l['id'] as String,
-                                  sessionTitle: sessionTitle,
-                                  subjectName: subject.toString(),
-                                ),
-                                icon: const Icon(Icons.chat_rounded, size: 18),
-                                label: const Text('واتساب'),
-                              )
-                            else
-                              const Icon(
-                                Icons.bluetooth_searching_rounded,
-                                color: AppColors.primary,
-                              ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        ).animate(delay: (40 * i).ms).fadeIn();
+                      },
                     ),
-                  ).animate(delay: (40 * i).ms).fadeIn();
-                },
+                  ),
+                ],
               ),
       ),
     );

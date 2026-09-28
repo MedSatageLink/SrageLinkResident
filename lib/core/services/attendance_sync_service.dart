@@ -7,9 +7,12 @@ import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../../supabase_config.dart';
+import 'device_service.dart';
 
 const String _syncTaskName = 'residentAttendanceSyncTask';
 const String _queueKey = 'resident_offline_scan_queue_v1';
+const String _clockSkewPrefix = 'resident_clock_skew_ms_v1';
+const String _clockSkewMeasuredPrefix = 'resident_clock_skew_measured_at_v1';
 
 @pragma('vm:entry-point')
 void attendanceSyncCallbackDispatcher() {
@@ -33,16 +36,10 @@ class AttendanceSyncResult {
   final bool success;
   final String message;
   final String status;
-  final String? claimedResidentId;
-  final String? claimedResidentName;
-  final String? claimedResidentPhone;
   const AttendanceSyncResult(
     this.success,
     this.message, {
     required this.status,
-    this.claimedResidentId,
-    this.claimedResidentName,
-    this.claimedResidentPhone,
   });
 }
 
@@ -60,6 +57,107 @@ class AttendanceSyncService {
   AttendanceSyncService._();
   static final AttendanceSyncService instance = AttendanceSyncService._();
   static const _uuid = Uuid();
+  static const Duration _clockSkewRefreshInterval = Duration(minutes: 10);
+
+  bool _isSyriaTimezoneNow() {
+    // Syria local timezone is UTC+3.
+    return DateTime.now().timeZoneOffset.inMinutes == 180;
+  }
+
+  Future<String> _clockSkewKey(String uid) async {
+    final deviceId = await DeviceService().getDeviceId();
+    return '$_clockSkewPrefix:$uid:$deviceId';
+  }
+
+  Future<String> _clockSkewMeasuredAtKey(String uid) async {
+    final deviceId = await DeviceService().getDeviceId();
+    return '$_clockSkewMeasuredPrefix:$uid:$deviceId';
+  }
+
+  Future<Duration?> _readClockSkew(String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = await _clockSkewKey(uid);
+    final ms = prefs.getInt(key);
+    if (ms == null) return null;
+    return Duration(milliseconds: ms);
+  }
+
+  Future<void> _writeClockSkew(String uid, Duration skew) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = await _clockSkewKey(uid);
+    final measuredKey = await _clockSkewMeasuredAtKey(uid);
+    await prefs.setInt(key, skew.inMilliseconds);
+    await prefs.setString(
+      measuredKey,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  Future<bool> _shouldRefreshClockSkew(String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    final measuredKey = await _clockSkewMeasuredAtKey(uid);
+    final measuredRaw = prefs.getString(measuredKey);
+    if (measuredRaw == null || measuredRaw.trim().isEmpty) return true;
+    final measuredAt = DateTime.tryParse(measuredRaw);
+    if (measuredAt == null) return true;
+    return DateTime.now().toUtc().difference(measuredAt) >=
+        _clockSkewRefreshInterval;
+  }
+
+  Future<void> _refreshClockSkewIfNeeded(
+    String uid, {
+    bool force = false,
+  }) async {
+    try {
+      if (!force) {
+        final should = await _shouldRefreshClockSkew(uid);
+        if (!should) return;
+      }
+
+      final res = await Supabase.instance.client.rpc('get_server_now_utc');
+      final serverNow = DateTime.tryParse(res.toString());
+      if (serverNow == null) return;
+
+      final deviceNowUtc = DateTime.now().toUtc();
+      final skew = serverNow.difference(deviceNowUtc);
+      await _writeClockSkew(uid, skew);
+    } catch (_) {
+      // Ignore transient failures; offline path continues.
+    }
+  }
+
+  Future<Map<String, dynamic>> _buildScanTimePayload(String uid) async {
+    final rawDeviceAt = DateTime.now().toUtc();
+    final skew = await _readClockSkew(uid);
+    final corrected = skew == null ? rawDeviceAt : rawDeviceAt.add(skew);
+    return {
+      'rawDeviceAtUtc': rawDeviceAt,
+      'correctedUtc': corrected,
+      'skewMsUsed': skew?.inMilliseconds,
+    };
+  }
+
+  Future<Map<String, dynamic>> _prepareQueuedItemForSubmit(
+    String uid,
+    Map<String, dynamic> item,
+  ) async {
+    if (item['skew_ms_used'] != null) return item;
+
+    final skew = await _readClockSkew(uid);
+    if (skew == null) return item;
+
+    final rawBase =
+        DateTime.tryParse(item['raw_device_at_utc']?.toString() ?? '') ??
+        DateTime.tryParse(item['scanned_local_at']?.toString() ?? '');
+    if (rawBase == null) return item;
+
+    final corrected = rawBase.toUtc().add(skew);
+    return {
+      ...item,
+      'scanned_local_at': corrected.toIso8601String(),
+      'skew_ms_used': skew.inMilliseconds,
+    };
+  }
 
   Future<void> initializeBackgroundSync() async {
     await Workmanager().initialize(attendanceSyncCallbackDispatcher);
@@ -86,6 +184,20 @@ class AttendanceSyncService {
       );
     }
 
+    if (!_isSyriaTimezoneNow()) {
+      return const AttendanceSyncResult(
+        false,
+        'يرجى ضبط المنطقة الزمنية للجهاز على التوقيت السوري (UTC+3) قبل تسجيل الحضور',
+        status: 'invalid_device_timezone',
+      );
+    }
+
+    await _refreshClockSkewIfNeeded(uid);
+    final timePayload = await _buildScanTimePayload(uid);
+    final correctedUtc = timePayload['correctedUtc'] as DateTime;
+    final rawDeviceAtUtc = timePayload['rawDeviceAtUtc'] as DateTime;
+    final skewMsUsed = timePayload['skewMsUsed'] as int?;
+
     final payload = {
       'id': _uuid.v4(),
       'idempotency_key': _uuid.v4(),
@@ -93,7 +205,9 @@ class AttendanceSyncService {
       'student_id': studentId,
       'resident_id': uid,
       'event_type': eventType.value,
-      'scanned_local_at': DateTime.now().toUtc().toIso8601String(),
+      'scanned_local_at': correctedUtc.toIso8601String(),
+      'raw_device_at_utc': rawDeviceAtUtc.toIso8601String(),
+      'skew_ms_used': skewMsUsed,
       'queued_at': DateTime.now().toUtc().toIso8601String(),
     };
 
@@ -136,17 +250,6 @@ class AttendanceSyncService {
         );
       }
       if ((result['message'] as String?) ==
-          'lecture_claimed_by_other_resident') {
-        return AttendanceSyncResult(
-          false,
-          'تم استلام هذه المحاضرة من مقيم آخر',
-          status: 'lecture_claimed_by_other_resident',
-          claimedResidentId: result['claimed_resident_id']?.toString(),
-          claimedResidentName: result['claimed_resident_name']?.toString(),
-          claimedResidentPhone: result['claimed_resident_phone']?.toString(),
-        );
-      }
-      if ((result['message'] as String?) ==
           'resident_not_allowed_for_subject') {
         return const AttendanceSyncResult(
           false,
@@ -185,60 +288,18 @@ class AttendanceSyncService {
     }
   }
 
-  Future<AttendanceSyncResult> releaseLectureResident({
-    required String lectureId,
-  }) async {
-    try {
-      final res = await Supabase.instance.client.rpc(
-        'release_practical_lecture_resident',
-        params: {'p_lecture_id': lectureId},
-      );
-      final map = Map<String, dynamic>.from(res as Map);
-      final status = map['status'] as String? ?? '';
-      final message = map['message'] as String?;
-
-      if (status == 'released') {
-        return const AttendanceSyncResult(
-          true,
-          'تمت إعادة فتح المحاضرة لمقيم آخر بنجاح',
-          status: 'released',
-        );
-      }
-      if (status == 'already_unclaimed') {
-        return const AttendanceSyncResult(
-          true,
-          'المحاضرة غير مستلمة حالياً',
-          status: 'already_unclaimed',
-        );
-      }
-      if (message == 'not_lecture_owner') {
-        return const AttendanceSyncResult(
-          false,
-          'لا يمكنك التوكيل لأنك لست المستلم الحالي للمحاضرة',
-          status: 'not_lecture_owner',
-        );
-      }
-
-      return AttendanceSyncResult(
-        false,
-        message ?? 'تعذر تنفيذ التوكيل',
-        status: status.isEmpty ? 'failed' : status,
-      );
-    } catch (_) {
-      return const AttendanceSyncResult(
-        false,
-        'تعذر الاتصال بالخادم لتنفيذ التوكيل',
-        status: 'network_error',
-      );
-    }
-  }
-
   Future<void> syncPendingQueue() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+
+    await _refreshClockSkewIfNeeded(uid);
+
     final queue = await _readQueue();
     if (queue.isEmpty) return;
 
     final remaining = <Map<String, dynamic>>[];
-    for (final item in queue) {
+    for (final queued in queue) {
+      final item = await _prepareQueuedItemForSubmit(uid, queued);
       try {
         final result = await _submitAttempt(item);
         final status = result['status'] as String? ?? '';

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/scanner/screens/scanner_screen.dart';
+import '../../features/scanner/screens/multi_lecture_scanner_screen.dart';
 import '../../features/lectures/screens/my_lectures_screen.dart';
 import '../../features/videos/screens/create_practical_video_screen.dart';
 
@@ -25,6 +26,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/scan/:lectureId',
         builder: (_, state) =>
             ScannerScreen(lectureId: state.pathParameters['lectureId']!),
+      ),
+      GoRoute(
+        path: '/scan-subject/:subjectId',
+        builder: (_, state) {
+          final lectures =
+              (state.extra as List?)?.cast<Map<String, dynamic>>() ??
+              <Map<String, dynamic>>[];
+          return MultiLectureScannerScreen(
+            subjectId: state.pathParameters['subjectId']!,
+            lectures: lectures,
+          );
+        },
       ),
       GoRoute(
         path: '/my-lectures',

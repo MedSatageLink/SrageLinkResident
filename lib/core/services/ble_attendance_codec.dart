@@ -4,11 +4,13 @@ class BleBoundAttendancePacket {
   final String studentId;
   final int lectureToken16;
   final int eventCode;
+  final int requestNonce16;
 
   const BleBoundAttendancePacket({
     required this.studentId,
     required this.lectureToken16,
     required this.eventCode,
+    required this.requestNonce16,
   });
 }
 
@@ -18,7 +20,31 @@ class BleAttendanceCodec {
       '0000a100-0000-1000-8000-00805f9b34fb';
 
   // New sender format: [4, event_code, student_uuid_16_bytes, lecture_token_hi, lecture_token_lo]
-  static const int studentLectureBindingVersion = 4;
+  // Version 5 adds request nonce: [..., lecture_token_hi, lecture_token_lo, nonce_hi, nonce_lo]
+  static const int studentLectureBindingVersion = 5;
+  static const int legacyStudentLectureBindingVersion = 4;
+
+  static List<String> buildAckServiceUuids({
+    required String studentId,
+    required int lectureToken16,
+    required int eventCode,
+    required int statusCode,
+    required int requestNonce16,
+  }) {
+    final tokenHex = lectureToken16.toRadixString(16).padLeft(4, '0');
+    final eventHex = eventCode.toRadixString(16).padLeft(2, '0');
+    final statusHex = statusCode.toRadixString(16).padLeft(2, '0');
+    final ackMeta = (tokenHex + eventHex + statusHex).toLowerCase();
+    final nonceHex = requestNonce16.toRadixString(16).padLeft(4, '0');
+    final nonceMarker = (nonceHex + 'a500').toLowerCase();
+
+    return <String>[
+      markerServiceUuidFull,
+      normalizeUuid(studentId),
+      ackMeta,
+      nonceMarker,
+    ];
+  }
 
   static String? parse(Uint8List bytes) {
     if (bytes.length != 17 && bytes.length != 18) return null;
@@ -46,16 +72,37 @@ class BleAttendanceCodec {
   }
 
   static BleBoundAttendancePacket? parseBoundPacket(Uint8List bytes) {
-    if (bytes.length != 20) return null;
-    if (bytes[0] != studentLectureBindingVersion) return null;
+    if (bytes.isEmpty) return null;
+    if (bytes[0] != studentLectureBindingVersion &&
+        bytes[0] != legacyStudentLectureBindingVersion) {
+      return null;
+    }
+
+    if (bytes[0] == legacyStudentLectureBindingVersion) {
+      if (bytes.length != 20) return null;
+      final eventCode = bytes[1] & 0xFF;
+      if (eventCode != 1 && eventCode != 2) return null;
+      final student = _bytesToUuid(bytes.sublist(2, 18));
+      final token = ((bytes[18] & 0xFF) << 8) | (bytes[19] & 0xFF);
+      return BleBoundAttendancePacket(
+        studentId: student,
+        lectureToken16: token,
+        eventCode: eventCode,
+        requestNonce16: 0,
+      );
+    }
+
+    if (bytes.length != 22) return null;
     final eventCode = bytes[1] & 0xFF;
     if (eventCode != 1 && eventCode != 2) return null;
     final student = _bytesToUuid(bytes.sublist(2, 18));
     final token = ((bytes[18] & 0xFF) << 8) | (bytes[19] & 0xFF);
+    final nonce = ((bytes[20] & 0xFF) << 8) | (bytes[21] & 0xFF);
     return BleBoundAttendancePacket(
       studentId: student,
       lectureToken16: token,
       eventCode: eventCode,
+      requestNonce16: nonce,
     );
   }
 
@@ -80,7 +127,7 @@ class BleAttendanceCodec {
   }
 
   /// Parse service UUIDs broadcasted by student devices.
-  /// Returns map with keys: 'studentUuid' (String), 'lectureToken' (int), 'eventCode' (int)
+  /// Returns map with keys: 'studentUuid' (String), 'lectureToken' (int), 'eventCode' (int), 'requestNonce16' (int)
   static Map<String, dynamic> parseServiceBroadcastInfo(
     Iterable<String> serviceUuids,
   ) {
@@ -141,6 +188,16 @@ class BleAttendanceCodec {
 
     if (parsedToken != null) out['lectureToken'] = parsedToken;
     if (parsedEvent != null) out['eventCode'] = parsedEvent;
+
+    for (final raw in serviceUuids) {
+      final clean = raw.replaceAll('-', '').toLowerCase();
+      if (clean.length == 8 && clean.endsWith('a500')) {
+        try {
+          out['requestNonce16'] = int.parse(clean.substring(0, 4), radix: 16);
+          break;
+        } catch (_) {}
+      }
+    }
 
     /*
      * NOTE:
