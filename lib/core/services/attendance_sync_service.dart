@@ -10,7 +10,11 @@ import '../../supabase_config.dart';
 import 'device_service.dart';
 
 const String _syncTaskName = 'residentAttendanceSyncTask';
+const String _syncOneOffTaskName = 'residentAttendanceSyncOneOffTask';
+const String _syncPeriodicUniqueName = 'residentAttendanceSyncPeriodicUnique';
+const String _syncOneOffUniqueName = 'residentAttendanceSyncOneOffUnique';
 const String _queueKey = 'resident_offline_scan_queue_v1';
+const String _sessionSnapshotKey = 'resident_auth_session_snapshot_v1';
 const String _clockSkewPrefix = 'resident_clock_skew_ms_v1';
 const String _clockSkewMeasuredPrefix = 'resident_clock_skew_measured_at_v1';
 
@@ -58,6 +62,29 @@ class AttendanceSyncService {
   static final AttendanceSyncService instance = AttendanceSyncService._();
   static const _uuid = Uuid();
   static const Duration _clockSkewRefreshInterval = Duration(minutes: 10);
+
+  Future<void> _persistSessionSnapshot() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionSnapshotKey, jsonEncode(session.toJson()));
+  }
+
+  Future<bool> _ensureAuthSessionForBackground() async {
+    if (Supabase.instance.client.auth.currentUser != null) return true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_sessionSnapshotKey);
+    if (raw == null || raw.trim().isEmpty) return false;
+
+    try {
+      await Supabase.instance.client.auth.recoverSession(raw);
+    } catch (_) {
+      return false;
+    }
+
+    return Supabase.instance.client.auth.currentUser != null;
+  }
 
   bool _isSyriaTimezoneNow() {
     // Syria local timezone is UTC+3.
@@ -162,11 +189,22 @@ class AttendanceSyncService {
   Future<void> initializeBackgroundSync() async {
     await Workmanager().initialize(attendanceSyncCallbackDispatcher);
     await Workmanager().registerPeriodicTask(
-      'residentAttendanceSyncUnique',
+      _syncPeriodicUniqueName,
       _syncTaskName,
       frequency: const Duration(minutes: 15),
       existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       constraints: Constraints(networkType: NetworkType.connected),
+    );
+    await _scheduleOneOffSync();
+  }
+
+  Future<void> _scheduleOneOffSync() async {
+    await Workmanager().registerOneOffTask(
+      _syncOneOffUniqueName,
+      _syncOneOffTaskName,
+      existingWorkPolicy: ExistingWorkPolicy.replace,
+      constraints: Constraints(networkType: NetworkType.connected),
+      initialDelay: const Duration(seconds: 10),
     );
   }
 
@@ -183,6 +221,8 @@ class AttendanceSyncService {
         status: 'not_logged_in',
       );
     }
+
+    await _persistSessionSnapshot();
 
     if (!_isSyriaTimezoneNow()) {
       return const AttendanceSyncResult(
@@ -280,6 +320,7 @@ class AttendanceSyncService {
       );
     } catch (_) {
       await _enqueueLocal(payload);
+      await _scheduleOneOffSync();
       return AttendanceSyncResult(
         true,
         'تم حفظ ${eventType.arabicLabel} محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
@@ -289,8 +330,12 @@ class AttendanceSyncService {
   }
 
   Future<void> syncPendingQueue() async {
+    await _ensureAuthSessionForBackground();
     final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (uid == null) return;
+    if (uid == null) {
+      await _scheduleOneOffSync();
+      return;
+    }
 
     await _refreshClockSkewIfNeeded(uid);
 
@@ -321,6 +366,9 @@ class AttendanceSyncService {
     }
 
     await _writeQueue(remaining);
+    if (remaining.isNotEmpty) {
+      await _scheduleOneOffSync();
+    }
   }
 
   Future<Map<String, dynamic>> _submitAttempt(Map<String, dynamic> item) async {

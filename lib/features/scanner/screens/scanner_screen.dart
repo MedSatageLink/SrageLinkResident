@@ -282,18 +282,33 @@ class _State extends ConsumerState<ScannerScreen> {
       }
 
       final serviceUuids = BleAttendanceCodec.buildAckServiceUuids(
-        studentId: packet.studentId,
         lectureToken16: packet.lectureToken16,
         eventCode: packet.eventCode,
         statusCode: statusCode,
         requestNonce16: packet.requestNonce16,
       );
 
-      await _ackPeripheral.start(
-        advertiseData: AdvertiseDataCore(serviceUuids: serviceUuids),
-      );
+      // Send multiple short bursts to reduce ACK loss when student starts
+      // scanning slightly after submitting attendance.
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      for (var i = 0; i < 3; i++) {
+        try {
+          await _ackPeripheral.start(
+            advertiseData: AdvertiseDataCore(serviceUuids: serviceUuids),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 1000));
+        } catch (_) {
+          // Best effort per burst.
+        } finally {
+          try {
+            await _ackPeripheral.stop();
+          } catch (_) {}
+        }
 
-      await Future<void>.delayed(const Duration(milliseconds: 1200));
+        if (i < 2) {
+          await Future<void>.delayed(const Duration(milliseconds: 180));
+        }
+      }
     } catch (_) {
       // Best effort ACK.
     } finally {

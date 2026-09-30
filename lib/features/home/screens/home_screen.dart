@@ -142,7 +142,6 @@ class ResidentHomeScreen extends ConsumerStatefulWidget {
 
 class _ResidentHomeScreenState extends ConsumerState<ResidentHomeScreen>
     with WidgetsBindingObserver {
-  Timer? _deviceLockTimer;
   bool _checkingDeviceLock = false;
   bool _forcedLogout = false;
 
@@ -151,10 +150,6 @@ class _ResidentHomeScreenState extends ConsumerState<ResidentHomeScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_enforceDeviceLock());
-    _deviceLockTimer = Timer.periodic(
-      const Duration(seconds: 45),
-      (_) => unawaited(_enforceDeviceLock()),
-    );
   }
 
   @override
@@ -205,7 +200,6 @@ class _ResidentHomeScreenState extends ConsumerState<ResidentHomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _deviceLockTimer?.cancel();
     super.dispose();
   }
 

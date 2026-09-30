@@ -16,6 +16,7 @@ class BleBoundAttendancePacket {
 
 class BleAttendanceCodec {
   static const int manufacturerId = 0x1234;
+  static const String markerServiceUuidShort = 'a100';
   static const String markerServiceUuidFull =
       '0000a100-0000-1000-8000-00805f9b34fb';
 
@@ -25,7 +26,6 @@ class BleAttendanceCodec {
   static const int legacyStudentLectureBindingVersion = 4;
 
   static List<String> buildAckServiceUuids({
-    required String studentId,
     required int lectureToken16,
     required int eventCode,
     required int statusCode,
@@ -38,12 +38,7 @@ class BleAttendanceCodec {
     final nonceHex = requestNonce16.toRadixString(16).padLeft(4, '0');
     final nonceMarker = (nonceHex + 'a500').toLowerCase();
 
-    return <String>[
-      markerServiceUuidFull,
-      normalizeUuid(studentId),
-      ackMeta,
-      nonceMarker,
-    ];
+    return <String>[markerServiceUuidShort, ackMeta, nonceMarker];
   }
 
   static String? parse(Uint8List bytes) {
