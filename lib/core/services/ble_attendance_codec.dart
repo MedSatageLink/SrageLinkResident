@@ -19,6 +19,7 @@ class BleAttendanceCodec {
   static const String markerServiceUuidShort = 'a100';
   static const String markerServiceUuidFull =
       '0000a100-0000-1000-8000-00805f9b34fb';
+  static const int ackManufacturerVersion = 6;
 
   // New sender format: [4, event_code, student_uuid_16_bytes, lecture_token_hi, lecture_token_lo]
   // Version 5 adds request nonce: [..., lecture_token_hi, lecture_token_lo, nonce_hi, nonce_lo]
@@ -39,6 +40,23 @@ class BleAttendanceCodec {
     final nonceMarker = (nonceHex + 'a500').toLowerCase();
 
     return <String>[markerServiceUuidShort, ackMeta, nonceMarker];
+  }
+
+  static Uint8List buildAckManufacturerData({
+    required int lectureToken16,
+    required int eventCode,
+    required int statusCode,
+    required int requestNonce16,
+  }) {
+    return Uint8List.fromList(<int>[
+      ackManufacturerVersion,
+      eventCode & 0xFF,
+      statusCode & 0xFF,
+      (lectureToken16 >> 8) & 0xFF,
+      lectureToken16 & 0xFF,
+      (requestNonce16 >> 8) & 0xFF,
+      requestNonce16 & 0xFF,
+    ]);
   }
 
   static String? parse(Uint8List bytes) {

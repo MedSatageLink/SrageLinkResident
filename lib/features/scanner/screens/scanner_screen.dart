@@ -287,6 +287,12 @@ class _State extends ConsumerState<ScannerScreen> {
         statusCode: statusCode,
         requestNonce16: packet.requestNonce16,
       );
+      final ackPayload = BleAttendanceCodec.buildAckManufacturerData(
+        lectureToken16: packet.lectureToken16,
+        eventCode: packet.eventCode,
+        statusCode: statusCode,
+        requestNonce16: packet.requestNonce16,
+      );
 
       // Send multiple short bursts to reduce ACK loss when student starts
       // scanning slightly after submitting attendance.
@@ -294,7 +300,11 @@ class _State extends ConsumerState<ScannerScreen> {
       for (var i = 0; i < 3; i++) {
         try {
           await _ackPeripheral.start(
-            advertiseData: AdvertiseDataCore(serviceUuids: serviceUuids),
+            advertiseData: AdvertiseDataCore(
+              serviceUuids: serviceUuids,
+              manufacturerId: BleAttendanceCodec.manufacturerId,
+              manufacturerData: ackPayload,
+            ),
           );
           await Future<void>.delayed(const Duration(milliseconds: 1000));
         } catch (_) {
