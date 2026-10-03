@@ -212,6 +212,7 @@ class AttendanceSyncService {
     required String lectureId,
     required String studentId,
     required AttendanceEventType eventType,
+    bool requireInternet = false,
   }) async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) {
@@ -233,6 +234,21 @@ class AttendanceSyncService {
     }
 
     await _refreshClockSkewIfNeeded(uid);
+
+    if (requireInternet) {
+      try {
+        await Supabase.instance.client
+            .rpc('get_server_now_utc')
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        return const AttendanceSyncResult(
+          false,
+          'التعويض يتطلب اتصالاً مباشراً بالإنترنت',
+          status: 'internet_required',
+        );
+      }
+    }
+
     final timePayload = await _buildScanTimePayload(uid);
     final correctedUtc = timePayload['correctedUtc'] as DateTime;
     final rawDeviceAtUtc = timePayload['rawDeviceAtUtc'] as DateTime;
@@ -312,13 +328,67 @@ class AttendanceSyncService {
           status: 'queued_for_approval',
         );
       }
+      if (serverMessage == 'compensation_day_not_allowed') {
+        return const AttendanceSyncResult(
+          false,
+          'التعويض مسموح فقط يوم الأربعاء أو السبت (بتوقيت دمشق)',
+          status: 'compensation_day_not_allowed',
+        );
+      }
+      if (serverMessage == 'compensation_quota_exhausted') {
+        return const AttendanceSyncResult(
+          false,
+          'تم استنفاد فرص التعويض لهذا الطالب',
+          status: 'compensation_quota_exhausted',
+        );
+      }
+      if (serverMessage == 'compensation_already_used_today') {
+        return const AttendanceSyncResult(
+          false,
+          'لا يمكن تعويض أكثر من محاضرة واحدة في نفس اليوم',
+          status: 'compensation_already_used_today',
+        );
+      }
       final msg = serverMessage;
       return AttendanceSyncResult(
         false,
         msg ?? 'فشل التسجيل',
         status: status.isEmpty ? 'failed' : status,
       );
+    } on PostgrestException catch (e) {
+      if (requireInternet) {
+        final backendMsg = (e.message).trim();
+        if (backendMsg.isNotEmpty) {
+          return AttendanceSyncResult(
+            false,
+            backendMsg,
+            status: 'backend_error',
+          );
+        }
+      }
+
+      if (requireInternet) {
+        return const AttendanceSyncResult(
+          false,
+          'التعويض يتطلب اتصالاً مباشراً بالإنترنت',
+          status: 'internet_required',
+        );
+      }
+      await _enqueueLocal(payload);
+      await _scheduleOneOffSync();
+      return AttendanceSyncResult(
+        true,
+        'تم حفظ ${eventType.arabicLabel} محلياً وسيتم رفعه تلقائياً عند عودة الاتصال',
+        status: 'queued_local',
+      );
     } catch (_) {
+      if (requireInternet) {
+        return const AttendanceSyncResult(
+          false,
+          'التعويض يتطلب اتصالاً مباشراً بالإنترنت',
+          status: 'internet_required',
+        );
+      }
       await _enqueueLocal(payload);
       await _scheduleOneOffSync();
       return AttendanceSyncResult(

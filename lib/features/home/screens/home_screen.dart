@@ -335,7 +335,25 @@ class _SubjectLecturesTab extends ConsumerWidget {
         error: (e, _) => Center(child: Text(AppErrorMessage.from(e))),
         data: (lectures) => lectures.isEmpty
             ? ListView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                 children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () =>
+                          context.push('/scan-compensation/$subjectId'),
+                      icon: const Icon(Icons.assignment_turned_in_rounded),
+                      label: const Text('تعويض (يتطلب إنترنت)'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.warning,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 180),
                   Center(
                     child: Column(
@@ -355,6 +373,26 @@ class _SubjectLecturesTab extends ConsumerWidget {
               )
             : Column(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () =>
+                            context.push('/scan-compensation/$subjectId'),
+                        icon: const Icon(Icons.assignment_turned_in_rounded),
+                        label: const Text('تعويض (يتطلب إنترنت)'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.warning,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                   if (lectures.length > 1)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),

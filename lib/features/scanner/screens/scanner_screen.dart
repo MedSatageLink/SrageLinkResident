@@ -354,7 +354,6 @@ class _State extends ConsumerState<ScannerScreen> {
       final acceptedStatuses = <String>{
         'accepted_check_in',
         'accepted_check_out',
-        'queued_for_approval',
         'queued_local',
       };
       final rejectedStatuses = <String>{
@@ -362,6 +361,10 @@ class _State extends ConsumerState<ScannerScreen> {
         'already_checked_out',
         'duplicate',
         'invalid_device_timezone',
+        'internet_required',
+        'compensation_day_not_allowed',
+        'compensation_quota_exhausted',
+        'compensation_already_used_today',
       };
       if (mounted) {
         int? ackStatusCode;
@@ -376,8 +379,7 @@ class _State extends ConsumerState<ScannerScreen> {
           }
         });
 
-        if (result.status == 'queued_local' ||
-            result.status == 'queued_for_approval') {
+        if (result.status == 'queued_local') {
           ackStatusCode = 2;
         }
 

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:gap/gap.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/attendance_sync_service.dart';
 import '../../../core/services/ble_attendance_codec.dart';
@@ -14,11 +15,13 @@ import '../../../core/theme/app_theme.dart';
 class MultiLectureScannerScreen extends ConsumerStatefulWidget {
   final String subjectId;
   final List<Map<String, dynamic>> lectures;
+  final bool compensationMode;
 
   const MultiLectureScannerScreen({
     super.key,
     required this.subjectId,
     required this.lectures,
+    this.compensationMode = false,
   });
 
   @override
@@ -42,6 +45,34 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
   bool _isSendingAck = false;
 
   late final Map<int, List<String>> _lectureTokenMap;
+
+  Future<String?> _resolveLectureForCompensation({
+    required String studentId,
+    required int lectureToken16,
+  }) async {
+    final rows = await Supabase.instance.client
+        .from('lecture_assignments')
+        .select(
+          'lecture_id, lectures!inner(practical_session_id, practical_sessions!inner(subject_id))',
+        )
+        .eq('student_id', studentId)
+        .eq('lectures.practical_sessions.subject_id', widget.subjectId)
+        .limit(300);
+
+    final lectureIds = List<Map<String, dynamic>>.from(rows as List)
+        .map((e) => e['lecture_id'] as String?)
+        .whereType<String>()
+        .toSet()
+        .toList();
+
+    final matches = lectureIds
+        .where((id) => BleAttendanceCodec.lectureToken16(id) == lectureToken16)
+        .toList();
+
+    if (matches.length == 1) return matches.first;
+    if (matches.length > 1) return '__collision__';
+    return null;
+  }
 
   @override
   void initState() {
@@ -224,22 +255,69 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
         continue;
       }
 
-      final matchingLectureIds = _lectureTokenMap[bound.lectureToken16];
-      if (matchingLectureIds == null || matchingLectureIds.isEmpty) {
-        continue;
+      String? lectureId;
+      if (widget.compensationMode) {
+        try {
+          final resolved = await _resolveLectureForCompensation(
+            studentId: bound.studentId,
+            lectureToken16: bound.lectureToken16,
+          );
+          if (resolved == '__collision__') {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'تعذر تحديد المحاضرة بدقة (تعارض رمز)، يرجى إعادة المحاولة',
+                  ),
+                ),
+              );
+            }
+            continue;
+          }
+          lectureId = resolved;
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('تعذر جلب بيانات التعويض، تحقق من الإنترنت'),
+              ),
+            );
+          }
+          continue;
+        }
+
+        if (lectureId == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'هذه المحاضرة غير تابعة لهذه المادة أو غير مخصصة للطالب',
+                ),
+              ),
+            );
+          }
+          continue;
+        }
+      } else {
+        final matchingLectureIds = _lectureTokenMap[bound.lectureToken16];
+        if (matchingLectureIds == null || matchingLectureIds.isEmpty) {
+          continue;
+        }
+        if (matchingLectureIds.length > 1) {
+          // Rare token collision; skip to avoid wrong attendance.
+          continue;
+        }
+        lectureId = matchingLectureIds.first;
       }
-      if (matchingLectureIds.length > 1) {
-        // Rare token collision; skip to avoid wrong attendance.
-        continue;
-      }
-      final lectureId = matchingLectureIds.first;
+
+      final resolvedLectureId = lectureId;
 
       final expectedEventCode = mode == AttendanceEventType.checkIn ? 1 : 2;
       if (bound.eventCode != expectedEventCode) {
         continue;
       }
 
-      final dedupeKey = '${bound.studentId}_${lectureId}_${mode.value}';
+      final dedupeKey = '${bound.studentId}_${resolvedLectureId}_${mode.value}';
       if (_sessionProcessedKeys.contains(dedupeKey)) {
         continue;
       }
@@ -252,7 +330,7 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
       _recentEvents[dedupeKey] = now;
       await _processAttendance(
         packet: bound,
-        lectureId: lectureId,
+        lectureId: resolvedLectureId,
         studentId: bound.studentId,
         eventType: mode,
       );
@@ -342,12 +420,12 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
             lectureId: lectureId,
             studentId: studentId,
             eventType: eventType,
+            requireInternet: widget.compensationMode,
           );
 
       final acceptedStatuses = <String>{
         'accepted_check_in',
         'accepted_check_out',
-        'queued_for_approval',
         'queued_local',
       };
       final rejectedStatuses = <String>{
@@ -355,6 +433,10 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
         'already_checked_out',
         'duplicate',
         'invalid_device_timezone',
+        'internet_required',
+        'compensation_day_not_allowed',
+        'compensation_quota_exhausted',
+        'compensation_already_used_today',
       };
 
       if (mounted) {
@@ -370,8 +452,7 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
           }
         });
 
-        if (result.status == 'queued_local' ||
-            result.status == 'queued_for_approval') {
+        if (result.status == 'queued_local') {
           ackStatusCode = 2;
         }
 
@@ -412,11 +493,17 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          isCheckInMode
-              ? 'استقبال دخول (كل جلسات اليوم)'
-              : isCheckOutMode
-              ? 'استقبال خروج (كل جلسات اليوم)'
-              : 'اختر وضع الاستقبال',
+          widget.compensationMode
+              ? (isCheckInMode
+                    ? 'تعويض: استقبال تسجيل دخول'
+                    : isCheckOutMode
+                    ? 'تعويض: استقبال تسجيل خروج'
+                    : 'تعويض: اختر وضع الاستقبال')
+              : (isCheckInMode
+                    ? 'استقبال دخول (كل جلسات اليوم)'
+                    : isCheckOutMode
+                    ? 'استقبال خروج (كل جلسات اليوم)'
+                    : 'اختر وضع الاستقبال'),
         ),
         actions: [
           IconButton(
@@ -482,6 +569,16 @@ class _State extends ConsumerState<MultiLectureScannerScreen> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const Gap(6),
+            if (widget.compensationMode)
+              Text(
+                'وضع التعويض يتطلب اتصالاً مباشراً بالإنترنت',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.warning,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            if (widget.compensationMode) const Gap(6),
             Text(
               _isBluetoothOn
                   ? 'البلوتوث مفعل'

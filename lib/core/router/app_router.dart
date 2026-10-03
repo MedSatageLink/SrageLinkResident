@@ -40,6 +40,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/scan-compensation/:subjectId',
+        builder: (_, state) => MultiLectureScannerScreen(
+          subjectId: state.pathParameters['subjectId']!,
+          lectures: const <Map<String, dynamic>>[],
+          compensationMode: true,
+        ),
+      ),
+      GoRoute(
         path: '/my-lectures',
         builder: (_, _) => const MyLecturesScreen(),
       ),
